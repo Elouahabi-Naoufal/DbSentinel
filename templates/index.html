@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SQLite Database Explorer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container mt-5">
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <div class="card shadow-lg">
+                    <div class="card-header bg-success text-white text-center">
+                        <h2><i class="fas fa-database me-2"></i>SQLite Database Explorer</h2>
+                        <p class="mb-0">Upload and explore SQLite databases with full CRUD support</p>
+                    </div>
+                    <div class="card-body">
+                        <!-- Flash Messages -->
+                        {% with messages = get_flashed_messages(with_categories=true) %}
+                            {% if messages %}
+                                {% for category, message in messages %}
+                                    <div class="alert alert-{{ 'danger' if category == 'error' else 'warning' if category == 'warning' else 'info' }} alert-dismissible fade show" role="alert">
+                                        <i class="fas fa-{{ 'exclamation-triangle' if category == 'error' else 'info-circle' }} me-2"></i>
+                                        {{ message }}
+                                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                                    </div>
+                                {% endfor %}
+                            {% endif %}
+                        {% endwith %}
+
+                        <!-- Password Form (shown when database is encrypted) -->
+                        {% if show_password %}
+                        <div class="mb-4">
+                            <h5><i class="fas fa-lock me-2"></i>Database Password Required</h5>
+                            <form method="POST" action="{{ url_for('unlock_database') }}">
+                                <div class="mb-3">
+                                    <label for="password" class="form-label">Enter database password:</label>
+                                    <input type="password" class="form-control" id="password" name="password" required>
+                                </div>
+                                <div class="d-flex gap-2">
+                                    <button type="submit" class="btn btn-success">
+                                        <i class="fas fa-unlock me-2"></i>Unlock Database
+                                    </button>
+                                    <a href="{{ url_for('index') }}" class="btn btn-secondary">
+                                        <i class="fas fa-times me-2"></i>Cancel
+                                    </a>
+                                </div>
+                            </form>
+                        </div>
+                        {% else %}
+                        <!-- File Upload Form -->
+                        <div class="mb-4">
+                            <h5><i class="fas fa-upload me-2"></i>Upload Database File</h5>
+                            <form method="POST" action="{{ url_for('upload_file') }}" enctype="multipart/form-data">
+                                <div class="mb-3">
+                                    <label for="file" class="form-label">Select SQLite database file (.db, .sqlite, .sqlite3):</label>
+                                    <input type="file" class="form-control" id="file" name="file" accept=".db,.sqlite,.sqlite3" required>
+                                </div>
+                                <button type="submit" class="btn btn-success btn-lg">
+                                    <i class="fas fa-database me-2"></i>Open Database
+                                </button>
+                            </form>
+                        </div>
+                        {% endif %}
+
+                        <!-- Instructions -->
+                        <div class="mt-4">
+                            <h6><i class="fas fa-info-circle me-2"></i>Features:</h6>
+                            <ul class="list-unstyled">
+                                <li><i class="fas fa-check text-success me-2"></i>Browse and explore SQLite database tables</li>
+                                <li><i class="fas fa-check text-success me-2"></i>View table contents in an interactive grid</li>
+                                <li><i class="fas fa-check text-success me-2"></i>Add, edit, and delete records (CRUD operations)</li>
+                                <li><i class="fas fa-check text-success me-2"></i>Sort columns and navigate large tables</li>
+                                <li><i class="fas fa-check text-success me-2"></i>Support for encrypted databases (SQLCipher)</li>
+                            </ul>
+                        </div>
+
+                        <!-- Technical Note -->
+                        <div class="alert alert-info mt-4">
+                            <h6><i class="fas fa-info-circle me-2"></i>Technical Note:</h6>
+                            <p class="mb-0">This is a web-based alternative to the requested PyQt5 desktop application. 
+                            While it provides similar functionality through a browser interface, full SQLCipher support 
+                            requires the desktop version with pysqlcipher3 library.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

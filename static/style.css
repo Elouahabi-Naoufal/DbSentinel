@@ -1,0 +1,243 @@
+/* Green-on-white theme as requested */
+:root {
+    --primary-green: #28a745;
+    --light-green: #d4edda;
+    --dark-green: #155724;
+    --hover-green: #218838;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #f8fff8;
+}
+
+/* Sidebar styling */
+.sidebar {
+    background-color: white;
+    border-right: 2px solid var(--light-green);
+    min-height: calc(100vh - 56px);
+    box-shadow: 2px 0 4px rgba(0,0,0,0.1);
+}
+
+.sidebar h6 {
+    color: var(--dark-green);
+    font-weight: 600;
+    border-bottom: 2px solid var(--light-green);
+    padding-bottom: 10px;
+    margin-bottom: 15px;
+}
+
+.table-item {
+    border: 1px solid var(--light-green) !important;
+    margin-bottom: 5px;
+    border-radius: 5px !important;
+    transition: all 0.2s ease;
+}
+
+.table-item:hover {
+    background-color: var(--light-green) !important;
+    border-color: var(--primary-green) !important;
+    transform: translateX(3px);
+}
+
+.table-item.active {
+    background-color: var(--primary-green) !important;
+    border-color: var(--primary-green) !important;
+    color: white !important;
+}
+
+/* Main content styling */
+.main-content {
+    background-color: white;
+    min-height: calc(100vh - 56px);
+}
+
+/* Table styling */
+.table {
+    background-color: white;
+    border: 1px solid var(--light-green);
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.table thead th {
+    background-color: var(--primary-green) !important;
+    color: white;
+    border: none;
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    cursor: pointer;
+    user-select: none;
+}
+
+.table thead th:hover {
+    background-color: var(--hover-green) !important;
+}
+
+.table tbody tr:hover {
+    background-color: var(--light-green);
+}
+
+.table tbody tr.selected {
+    background-color: #bee5eb;
+}
+
+/* Editable cells */
+.editable-cell {
+    cursor: text;
+    position: relative;
+}
+
+.editable-cell:hover {
+    background-color: #fff3cd;
+    outline: 1px solid #ffc107;
+}
+
+.editable-cell.editing {
+    background-color: white;
+    outline: 2px solid var(--primary-green);
+}
+
+.cell-input {
+    border: none;
+    background: transparent;
+    width: 100%;
+    padding: 5px;
+    font-family: inherit;
+    font-size: inherit;
+}
+
+.cell-input:focus {
+    outline: none;
+}
+
+/* Button styling */
+.btn-success {
+    background-color: var(--primary-green);
+    border-color: var(--primary-green);
+}
+
+.btn-success:hover {
+    background-color: var(--hover-green);
+    border-color: var(--hover-green);
+}
+
+.btn-outline-success {
+    color: var(--primary-green);
+    border-color: var(--primary-green);
+}
+
+.btn-outline-success:hover {
+    background-color: var(--primary-green);
+    border-color: var(--primary-green);
+}
+
+/* Form styling */
+.form-control:focus {
+    border-color: var(--primary-green);
+    box-shadow: 0 0 0 0.2rem rgba(40, 167, 69, 0.25);
+}
+
+/* Card styling */
+.card {
+    border: 1px solid var(--light-green);
+    border-radius: 10px;
+}
+
+.card-header {
+    background-color: var(--primary-green) !important;
+    border-bottom: 1px solid var(--primary-green);
+}
+
+/* Alert styling */
+.alert-info {
+    background-color: #e8f5e8;
+    border-color: var(--light-green);
+    color: var(--dark-green);
+}
+
+/* Pagination styling */
+.pagination .page-link {
+    color: var(--primary-green);
+    border-color: var(--light-green);
+}
+
+.pagination .page-link:hover {
+    background-color: var(--light-green);
+    border-color: var(--primary-green);
+}
+
+.pagination .page-item.active .page-link {
+    background-color: var(--primary-green);
+    border-color: var(--primary-green);
+}
+
+/* Checkbox styling */
+input[type="checkbox"] {
+    transform: scale(1.2);
+    accent-color: var(--primary-green);
+}
+
+/* Loading animation */
+.spinner-border.text-success {
+    color: var(--primary-green) !important;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .sidebar {
+        min-height: auto;
+    }
+    
+    .table-responsive {
+        font-size: 0.9rem;
+    }
+    
+    .btn-group {
+        flex-direction: column;
+    }
+    
+    .btn-group .btn {
+        margin-bottom: 5px;
+        border-radius: 0.375rem !important;
+    }
+}
+
+/* Table header sort indicators */
+.sortable {
+    position: relative;
+    padding-right: 25px !important;
+}
+
+.sortable::after {
+    content: '\f0dc';
+    font-family: 'Font Awesome 6 Free';
+    font-weight: 900;
+    position: absolute;
+    right: 10px;
+    opacity: 0.5;
+}
+
+.sortable.asc::after {
+    content: '\f0de';
+    opacity: 1;
+}
+
+.sortable.desc::after {
+    content: '\f0dd';
+    opacity: 1;
+}
+
+/* Success animations */
+@keyframes successPulse {
+    0% { background-color: transparent; }
+    50% { background-color: var(--light-green); }
+    100% { background-color: transparent; }
+}
+
+.success-flash {
+    animation: successPulse 0.6s ease-in-out;
+}
