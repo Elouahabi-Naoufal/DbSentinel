@@ -244,6 +244,114 @@ class DatabaseManager:
         cursor.execute(query)
         self.connection.commit()
         return True
+    
+    def add_column(self, table_name: str, column: dict) -> bool:
+        """Add a new column to an existing table."""
+        if not self.connection:
+            raise Exception("No database connection")
+        
+        col_def = f"{column['name']} {column['type']}"
+        if column.get('not_null'):
+            col_def += " NOT NULL"
+        if column.get('unique'):
+            col_def += " UNIQUE"
+        if column.get('default'):
+            col_def += f" DEFAULT {column['default']}"
+        
+        query = f"ALTER TABLE {table_name} ADD COLUMN {col_def}"
+        cursor = self.connection.cursor()
+        cursor.execute(query)
+        self.connection.commit()
+        return True
+
+
+class AddColumnDialog(QDialog):
+    """Dialog for adding a column to an existing table."""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setup_ui()
+    
+    def setup_ui(self):
+        self.setWindowTitle("Add Column")
+        self.setModal(True)
+        self.resize(400, 300)
+        self.setStyleSheet("""
+            QDialog { background-color: white; }
+            QLineEdit, QComboBox { padding: 8px; border: 2px solid #e9ecef; border-radius: 6px; font-size: 13px; }
+            QLineEdit:focus, QComboBox:focus { border-color: #007bff; }
+            QCheckBox { font-size: 13px; }
+        """)
+        
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Title
+        title = QLabel("Add New Column")
+        title.setFont(QFont("Segoe UI", 16, QFont.Bold))
+        title.setStyleSheet("color: #2c3e50; margin-bottom: 10px;")
+        layout.addWidget(title)
+        
+        # Form layout
+        form_layout = QGridLayout()
+        form_layout.setSpacing(10)
+        
+        # Column name
+        form_layout.addWidget(QLabel("Column Name:"), 0, 0)
+        self.name_edit = QLineEdit()
+        self.name_edit.setPlaceholderText("Enter column name")
+        form_layout.addWidget(self.name_edit, 0, 1)
+        
+        # Column type
+        form_layout.addWidget(QLabel("Data Type:"), 1, 0)
+        self.type_combo = QComboBox()
+        self.type_combo.addItems(["TEXT", "INTEGER", "REAL", "BLOB", "NUMERIC", "VARCHAR(255)", "DATE", "DATETIME"])
+        form_layout.addWidget(self.type_combo, 1, 1)
+        
+        # Constraints
+        self.not_null_check = QCheckBox("Not Null")
+        self.unique_check = QCheckBox("Unique")
+        form_layout.addWidget(self.not_null_check, 2, 0)
+        form_layout.addWidget(self.unique_check, 2, 1)
+        
+        # Default value
+        form_layout.addWidget(QLabel("Default Value:"), 3, 0)
+        self.default_edit = QLineEdit()
+        self.default_edit.setPlaceholderText("Optional default value")
+        form_layout.addWidget(self.default_edit, 3, 1)
+        
+        layout.addLayout(form_layout)
+        layout.addStretch()
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        add_btn = QPushButton("Add Column")
+        add_btn.clicked.connect(self.accept)
+        add_btn.setProperty("class", "success")
+        button_layout.addWidget(add_btn)
+        
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_btn)
+        
+        layout.addLayout(button_layout)
+    
+    def get_column_data(self):
+        """Get column definition."""
+        name = self.name_edit.text().strip()
+        if not name:
+            raise ValueError("Column name is required")
+        
+        return {
+            'name': name,
+            'type': self.type_combo.currentText(),
+            'not_null': self.not_null_check.isChecked(),
+            'unique': self.unique_check.isChecked(),
+            'default': self.default_edit.text().strip() or None
+        }
 
 
 class CreateTableDialog(QDialog):
@@ -678,6 +786,12 @@ class SQLiteExplorer(QMainWindow):
         self.create_table_btn.setMinimumHeight(35)
         header_layout.addWidget(self.create_table_btn)
         
+        self.add_column_btn = QPushButton("➕ Add Column")
+        self.add_column_btn.clicked.connect(self.add_column_to_table)
+        self.add_column_btn.setEnabled(False)
+        self.add_column_btn.setMinimumHeight(35)
+        header_layout.addWidget(self.add_column_btn)
+        
         self.add_row_btn = QPushButton("➕ Add Row")
         self.add_row_btn.clicked.connect(self.add_row)
         self.add_row_btn.setEnabled(False)
@@ -939,6 +1053,7 @@ class SQLiteExplorer(QMainWindow):
         # Set button classes for different styles
         self.delete_rows_btn.setProperty("class", "danger")
         self.add_row_btn.setProperty("class", "success")
+        self.add_column_btn.setProperty("class", "success")
         self.create_table_btn.setProperty("class", "primary")
     
     def open_database(self):
@@ -1162,6 +1277,23 @@ class SQLiteExplorer(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to create table: {str(e)}")
     
+    def add_column_to_table(self):
+        """Add a column to the current table."""
+        if not self.current_table:
+            return
+        
+        try:
+            dialog = AddColumnDialog(self)
+            if dialog.exec_() == QDialog.Accepted:
+                column = dialog.get_column_data()
+                self.db_manager.add_column(self.current_table, column)
+                self.load_table_data(self.current_table)
+                self.statusBar().showMessage(f"Column '{column['name']}' added to table '{self.current_table}'")
+        except ValueError as e:
+            QMessageBox.warning(self, "Validation Error", str(e))
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to add column: {str(e)}")
+    
     def refresh_table(self):
         """Refresh the current table data."""
         if self.current_table:
@@ -1178,6 +1310,7 @@ class SQLiteExplorer(QMainWindow):
         has_selection = len(self.table_widget.get_selected_rowids()) > 0
         
         self.create_table_btn.setEnabled(has_db)
+        self.add_column_btn.setEnabled(has_table)
         self.add_row_btn.setEnabled(has_table)
         self.delete_rows_btn.setEnabled(has_table and has_selection)
         self.refresh_btn.setEnabled(has_table)
