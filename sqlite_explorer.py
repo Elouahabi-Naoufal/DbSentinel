@@ -317,17 +317,18 @@ class TableWidget(QTableWidget):
         self.setGridStyle(Qt.SolidLine)
         self.setSortingEnabled(True)
         self.setShowGrid(True)
+        self.setWordWrap(False)
         
         # Set header properties for responsiveness
         h_header = self.horizontalHeader()
         h_header.setStretchLastSection(True)
         h_header.setSectionResizeMode(QHeaderView.Interactive)
-        h_header.setDefaultSectionSize(150)
-        h_header.setMinimumSectionSize(80)
+        h_header.setDefaultSectionSize(200)  # Increased default width
+        h_header.setMinimumSectionSize(120)  # Increased minimum width
         h_header.setCascadingSectionResizes(True)
         
         self.verticalHeader().setVisible(False)
-        self.verticalHeader().setDefaultSectionSize(35)
+        self.verticalHeader().setDefaultSectionSize(40)  # Increased row height
         
         # Connect signals
         self.itemChanged.connect(self.on_item_changed)
@@ -350,7 +351,12 @@ class TableWidget(QTableWidget):
                 item.original_value = str(cell_data) if cell_data is not None else ""
                 self.setItem(row_idx, col_idx, item)
         
+        # Resize columns to content but ensure minimum width for editing
         self.resizeColumnsToContents()
+        for col in range(self.columnCount()):
+            current_width = self.columnWidth(col)
+            if current_width < 150:  # Ensure minimum width for comfortable editing
+                self.setColumnWidth(col, 150)
     
     def get_selected_rowids(self) -> List[int]:
         """Get the rowids of selected rows."""
@@ -588,6 +594,16 @@ class SQLiteExplorer(QMainWindow):
         QTableWidget::item {
             padding: 8px 12px;
             border: none;
+            min-width: 120px;
+        }
+        
+        QTableWidget QLineEdit {
+            padding: 4px 8px;
+            border: 2px solid #007bff;
+            border-radius: 4px;
+            background-color: white;
+            font-size: 13px;
+            min-width: 200px;
         }
         
         QTableWidget::item:selected {
@@ -775,6 +791,9 @@ class SQLiteExplorer(QMainWindow):
             if not password:
                 QMessageBox.warning(self, "Warning", "Password cannot be empty.")
                 continue
+            
+            # Clean password (remove whitespace/newlines from copy-paste)
+            password = password.strip()
             
             # Test with password
             success, is_encrypted, error_msg = self.db_manager.test_database(file_path, password)
