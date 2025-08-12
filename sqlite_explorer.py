@@ -40,7 +40,12 @@ import os
 import sqlite3
 import io
 import tempfile
+import logging
 from typing import Optional, List, Tuple, Any
+
+# Configure logging
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -770,16 +775,20 @@ class BlobPreviewDialog(QDialog):
     
     def create_video_widget(self) -> QWidget:
         """Create widget for video preview."""
+        logger.debug("Creating video widget")
         widget = QWidget()
         layout = QVBoxLayout(widget)
         
         try:
+            logger.debug("Creating temporary file for video")
             with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_file:
                 temp_file.write(self.blob_data)
                 temp_path = temp_file.name
+            logger.debug(f"Temporary video file created: {temp_path}")
             
+            logger.debug("Creating QVideoWidget and QMediaPlayer")
             self.video_widget = QVideoWidget()
-            self.media_player = QMediaPlayer()
+            self.media_player = QMediaPlayer(None, QMediaPlayer.VideoSurface)
             self.media_player.setVideoOutput(self.video_widget)
             
             layout.addWidget(self.video_widget)
@@ -787,60 +796,67 @@ class BlobPreviewDialog(QDialog):
             controls_layout = QHBoxLayout()
             
             play_btn = QPushButton("▶️ Play")
-            play_btn.clicked.connect(self.media_player.play)
+            play_btn.clicked.connect(lambda: self.safe_media_action("play"))
             controls_layout.addWidget(play_btn)
             
             pause_btn = QPushButton("⏸️ Pause")
-            pause_btn.clicked.connect(self.media_player.pause)
+            pause_btn.clicked.connect(lambda: self.safe_media_action("pause"))
             controls_layout.addWidget(pause_btn)
             
             stop_btn = QPushButton("⏹️ Stop")
-            stop_btn.clicked.connect(self.media_player.stop)
+            stop_btn.clicked.connect(lambda: self.safe_media_action("stop"))
             controls_layout.addWidget(stop_btn)
             
             controls_layout.addStretch()
             layout.addLayout(controls_layout)
             
+            logger.debug("Loading video media")
             self.media_player.setMedia(QMediaContent(QUrl.fromLocalFile(temp_path)))
             self.temp_file_path = temp_path
+            logger.debug("Video widget created successfully")
             
         except Exception as e:
+            logger.error(f"Error creating video widget: {e}")
             layout.addWidget(QLabel(f"Error loading video: {str(e)}"))
         
         return widget
     
     def create_audio_widget(self) -> QWidget:
         """Create widget for audio preview."""
+        logger.debug("Creating audio widget")
         widget = QWidget()
         layout = QVBoxLayout(widget)
         
         try:
+            logger.debug("Creating temporary file for audio")
             with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as temp_file:
                 temp_file.write(self.blob_data)
                 temp_path = temp_file.name
+            logger.debug(f"Temporary audio file created: {temp_path}")
             
             info_label = QLabel(f"🎵 Audio File ({len(self.blob_data)} bytes)")
             info_label.setStyleSheet("font-size: 14px; padding: 20px; text-align: center;")
             info_label.setAlignment(Qt.AlignCenter)
             layout.addWidget(info_label)
             
-            self.media_player = QMediaPlayer()
+            logger.debug("Creating QMediaPlayer for audio")
+            self.media_player = QMediaPlayer(None, QMediaPlayer.LowLatency)
             
             controls_layout = QHBoxLayout()
             controls_layout.addStretch()
             
             play_btn = QPushButton("▶️ Play")
-            play_btn.clicked.connect(self.media_player.play)
+            play_btn.clicked.connect(lambda: self.safe_media_action("play"))
             play_btn.setMinimumSize(80, 40)
             controls_layout.addWidget(play_btn)
             
             pause_btn = QPushButton("⏸️ Pause")
-            pause_btn.clicked.connect(self.media_player.pause)
+            pause_btn.clicked.connect(lambda: self.safe_media_action("pause"))
             pause_btn.setMinimumSize(80, 40)
             controls_layout.addWidget(pause_btn)
             
             stop_btn = QPushButton("⏹️ Stop")
-            stop_btn.clicked.connect(self.media_player.stop)
+            stop_btn.clicked.connect(lambda: self.safe_media_action("stop"))
             stop_btn.setMinimumSize(80, 40)
             controls_layout.addWidget(stop_btn)
             
@@ -849,10 +865,13 @@ class BlobPreviewDialog(QDialog):
             
             layout.addStretch()
             
+            logger.debug("Loading audio media")
             self.media_player.setMedia(QMediaContent(QUrl.fromLocalFile(temp_path)))
             self.temp_file_path = temp_path
+            logger.debug("Audio widget created successfully")
             
         except Exception as e:
+            logger.error(f"Error creating audio widget: {e}")
             layout.addWidget(QLabel(f"Error loading audio: {str(e)}"))
         
         return widget
@@ -944,14 +963,60 @@ class BlobPreviewDialog(QDialog):
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to save file: {str(e)}")
     
+    def safe_media_action(self, action: str):
+        """Safely perform media player actions."""
+        try:
+            logger.debug(f"Performing media action: {action}")
+            if hasattr(self, 'media_player') and self.media_player:
+                if action == "play":
+                    self.media_player.play()
+                elif action == "pause":
+                    self.media_player.pause()
+                elif action == "stop":
+                    self.media_player.stop()
+                logger.debug(f"Media action {action} completed")
+            else:
+                logger.warning("No media player available for action")
+        except Exception as e:
+            logger.error(f"Error performing media action {action}: {e}")
+    
     def closeEvent(self, event):
-        """Clean up temporary files."""
-        if hasattr(self, 'temp_file_path'):
-            try:
-                os.unlink(self.temp_file_path)
-            except:
-                pass
-        super().closeEvent(event)
+        """Clean up temporary files and media player."""
+        logger.debug("BlobPreviewDialog closeEvent triggered")
+        
+        try:
+            # Stop and cleanup media player
+            if hasattr(self, 'media_player') and self.media_player:
+                logger.debug("Cleaning up media player")
+                self.media_player.stop()
+                self.media_player.setMedia(QMediaContent())
+                self.media_player.setParent(None)
+                self.media_player.deleteLater()
+                self.media_player = None
+                logger.debug("Media player cleanup completed")
+            
+            # Cleanup video widget
+            if hasattr(self, 'video_widget') and self.video_widget:
+                logger.debug("Cleaning up video widget")
+                self.video_widget.deleteLater()
+                self.video_widget = None
+                logger.debug("Video widget cleanup completed")
+            
+            # Clean up temporary files
+            if hasattr(self, 'temp_file_path'):
+                logger.debug(f"Cleaning up temporary file: {self.temp_file_path}")
+                try:
+                    os.unlink(self.temp_file_path)
+                    logger.debug("Temporary file deleted")
+                except Exception as e:
+                    logger.warning(f"Could not delete temp file: {e}")
+            
+            logger.debug("BlobPreviewDialog cleanup completed, accepting close event")
+            event.accept()
+            
+        except Exception as e:
+            logger.error(f"Error during BlobPreviewDialog closeEvent: {e}")
+            event.accept()  # Accept anyway to prevent hanging
 
 
 class BlobFieldWidget(QWidget):
@@ -2005,14 +2070,20 @@ class SQLiteExplorer(QMainWindow):
     
     def closeEvent(self, event):
         """Handle application closing."""
-        self.db_manager.disconnect()
-        event.accept()
+        logger.debug("Main application closeEvent triggered")
+        try:
+            self.db_manager.disconnect()
+            logger.debug("Database disconnected successfully")
+            event.accept()
+            logger.debug("Main application close event accepted")
+        except Exception as e:
+            logger.error(f"Error during main application close: {e}")
+            event.accept()
 
 
 def main():
     """Main application entry point."""
-    print("DEBUG: Starting SQLite Database Explorer with BLOB debugging enabled")
-    sys.stdout.flush()
+    logger.info("Starting SQLite Database Explorer with comprehensive debugging")
     
     app = QApplication(sys.argv)
     app.setApplicationName("SQLite Database Explorer")
@@ -2025,8 +2096,10 @@ def main():
         pass  # Icon file not found, continue without icon
     
     # Create and show main window
+    logger.debug("Creating main window")
     window = SQLiteExplorer()
     window.show()
+    logger.debug("Main window shown")
     
     # Check for SQLCipher availability and show warning if not available
     if not SQLCIPHER_AVAILABLE:
@@ -2041,7 +2114,10 @@ def main():
             "The application will work with regular SQLite databases."
         ))
     
-    sys.exit(app.exec_())
+    logger.debug("Starting application event loop")
+    exit_code = app.exec_()
+    logger.info(f"Application exited with code: {exit_code}")
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":
