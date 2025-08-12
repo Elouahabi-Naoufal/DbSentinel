@@ -38,6 +38,8 @@ Version: 1.0
 import sys
 import os
 import sqlite3
+import io
+import tempfile
 from typing import Optional, List, Tuple, Any
 
 from PyQt5.QtWidgets import (
@@ -46,10 +48,18 @@ from PyQt5.QtWidgets import (
     QHeaderView, QFileDialog, QMessageBox, QInputDialog, QDialog,
     QDialogButtonBox, QFormLayout, QLineEdit, QLabel, QPushButton,
     QAbstractItemView, QCheckBox, QFrame, QComboBox, QScrollArea,
-    QGroupBox, QGridLayout
+    QGroupBox, QGridLayout, QTextEdit
 )
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QFont, QIcon, QPalette, QColor
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QUrl
+from PyQt5.QtGui import QFont, QIcon, QPalette, QColor, QPixmap
+from PyQt5.QtWebEngineWidgets import QWebEngineView
+
+# Try to import PIL for image processing
+try:
+    from PIL import Image
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
 
 # Try to import pysqlcipher3 for encrypted database support
 try:
@@ -165,22 +175,27 @@ class DatabaseManager:
         cursor.execute(f"PRAGMA table_info({table_name});")
         return [(row[1], row[2]) for row in cursor.fetchall()]  # (name, type)
     
-    def get_table_data(self, table_name: str) -> Tuple[List[str], List[List[Any]]]:
-        """Get all data from a table."""
+    def get_table_data(self, table_name: str) -> Tuple[List[str], List[List[Any]], dict]:
+        """Get all data from a table with column type information."""
         if not self.connection:
             raise Exception("No database connection")
         
         cursor = self.connection.cursor()
         
-        # Get column names
+        # Get column names and types
         cursor.execute(f"PRAGMA table_info({table_name});")
-        columns = [row[1] for row in cursor.fetchall()]
+        table_info = cursor.fetchall()
+        columns = [row[1] for row in table_info]
+        column_types = {row[1]: row[2] for row in table_info}
+        
+        # Add rowid to column types
+        column_types['rowid'] = 'INTEGER'
         
         # Get data
         cursor.execute(f"SELECT rowid, * FROM {table_name};")
         rows = cursor.fetchall()
         
-        return ['rowid'] + columns, rows
+        return ['rowid'] + columns, rows, column_types
     
     def insert_row(self, table_name: str, data: dict) -> bool:
         """Insert a new row into the table."""
@@ -528,6 +543,273 @@ class CreateTableDialog(QDialog):
         return table_name, columns
 
 
+class BlobPreviewDialog(QDialog):
+    """Dialog for previewing blob content."""
+    
+    def __init__(self, blob_data: bytes, column_name: str, parent=None):
+        super().__init__(parent)
+        self.blob_data = blob_data
+        self.column_name = column_name
+        self.setup_ui()
+    
+    def setup_ui(self):
+        self.setWindowTitle(f"Preview: {self.column_name}")
+        self.setModal(True)
+        self.resize(800, 600)
+        
+        layout = QVBoxLayout(self)
+        
+        # Header
+        header = QLabel(f"Content Preview - {self.column_name} ({len(self.blob_data)} bytes)")
+        header.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        header.setStyleSheet("color: #2c3e50; padding: 10px; background: #f8f9fa; border-radius: 6px;")
+        layout.addWidget(header)
+        
+        # Content area
+        self.content_widget = self.create_content_widget()
+        layout.addWidget(self.content_widget)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        
+        save_btn = QPushButton("Save As...")
+        save_btn.clicked.connect(self.save_blob)
+        button_layout.addWidget(save_btn)
+        
+        button_layout.addStretch()
+        
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        button_layout.addWidget(close_btn)
+        
+        layout.addLayout(button_layout)
+    
+    def create_content_widget(self) -> QWidget:
+        """Create appropriate widget based on blob content type."""
+        content_type = self.detect_content_type()
+        
+        if content_type == 'image':
+            return self.create_image_widget()
+        elif content_type == 'text':
+            return self.create_text_widget()
+        elif content_type == 'pdf':
+            return self.create_pdf_widget()
+        else:
+            return self.create_hex_widget()
+    
+    def detect_content_type(self) -> str:
+        """Detect content type from blob data."""
+        if not self.blob_data:
+            return 'empty'
+        
+        # Check for image formats
+        if self.blob_data.startswith(b'\xff\xd8\xff'):  # JPEG
+            return 'image'
+        elif self.blob_data.startswith(b'\x89PNG\r\n\x1a\n'):  # PNG
+            return 'image'
+        elif self.blob_data.startswith(b'GIF8'):  # GIF
+            return 'image'
+        elif self.blob_data.startswith(b'BM'):  # BMP
+            return 'image'
+        elif self.blob_data.startswith(b'RIFF') and b'WEBP' in self.blob_data[:12]:  # WebP
+            return 'image'
+        
+        # Check for PDF
+        elif self.blob_data.startswith(b'%PDF'):  # PDF
+            return 'pdf'
+        
+        # Check if it's text (UTF-8)
+        try:
+            self.blob_data.decode('utf-8')
+            return 'text'
+        except UnicodeDecodeError:
+            pass
+        
+        return 'binary'
+    
+    def create_image_widget(self) -> QWidget:
+        """Create widget for image preview."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        try:
+            # Create QPixmap from blob data
+            pixmap = QPixmap()
+            pixmap.loadFromData(self.blob_data)
+            
+            if not pixmap.isNull():
+                # Scale image to fit while maintaining aspect ratio
+                scaled_pixmap = pixmap.scaled(700, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                
+                image_label = QLabel()
+                image_label.setPixmap(scaled_pixmap)
+                image_label.setAlignment(Qt.AlignCenter)
+                image_label.setStyleSheet("border: 1px solid #ddd; background: white;")
+                
+                # Add scroll area for large images
+                scroll = QScrollArea()
+                scroll.setWidget(image_label)
+                scroll.setWidgetResizable(True)
+                layout.addWidget(scroll)
+                
+                # Image info
+                info_label = QLabel(f"Image: {pixmap.width()}x{pixmap.height()} pixels")
+                info_label.setStyleSheet("color: #666; font-size: 11px; padding: 5px;")
+                layout.addWidget(info_label)
+            else:
+                layout.addWidget(QLabel("Unable to display image"))
+        except Exception as e:
+            layout.addWidget(QLabel(f"Error loading image: {str(e)}"))
+        
+        return widget
+    
+    def create_text_widget(self) -> QWidget:
+        """Create widget for text preview."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        try:
+            text_content = self.blob_data.decode('utf-8')
+            text_edit = QTextEdit()
+            text_edit.setPlainText(text_content)
+            text_edit.setReadOnly(True)
+            text_edit.setFont(QFont("Consolas", 10))
+            layout.addWidget(text_edit)
+        except Exception as e:
+            layout.addWidget(QLabel(f"Error decoding text: {str(e)}"))
+        
+        return widget
+    
+    def create_pdf_widget(self) -> QWidget:
+        """Create widget for PDF preview."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        try:
+            # Create temporary file for PDF
+            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as temp_file:
+                temp_file.write(self.blob_data)
+                temp_path = temp_file.name
+            
+            # Use QWebEngineView to display PDF
+            web_view = QWebEngineView()
+            web_view.load(QUrl.fromLocalFile(temp_path))
+            layout.addWidget(web_view)
+            
+            # Clean up temp file when dialog closes
+            self.temp_file_path = temp_path
+        except Exception as e:
+            layout.addWidget(QLabel(f"Error loading PDF: {str(e)}"))
+        
+        return widget
+    
+    def create_hex_widget(self) -> QWidget:
+        """Create widget for hex dump preview."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Create hex dump
+        hex_text = self.create_hex_dump()
+        
+        text_edit = QTextEdit()
+        text_edit.setPlainText(hex_text)
+        text_edit.setReadOnly(True)
+        text_edit.setFont(QFont("Consolas", 9))
+        layout.addWidget(text_edit)
+        
+        return widget
+    
+    def create_hex_dump(self) -> str:
+        """Create hex dump of binary data."""
+        lines = []
+        data = self.blob_data[:4096]  # Limit to first 4KB
+        
+        for i in range(0, len(data), 16):
+            chunk = data[i:i+16]
+            hex_part = ' '.join(f'{b:02x}' for b in chunk)
+            ascii_part = ''.join(chr(b) if 32 <= b <= 126 else '.' for b in chunk)
+            lines.append(f'{i:08x}  {hex_part:<48} |{ascii_part}|')
+        
+        if len(self.blob_data) > 4096:
+            lines.append(f'\n... ({len(self.blob_data) - 4096} more bytes)')
+        
+        return '\n'.join(lines)
+    
+    def save_blob(self):
+        """Save blob data to file."""
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Blob Data",
+            f"{self.column_name}_data",
+            "All Files (*)"
+        )
+        
+        if file_path:
+            try:
+                with open(file_path, 'wb') as f:
+                    f.write(self.blob_data)
+                QMessageBox.information(self, "Success", f"Data saved to {file_path}")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to save file: {str(e)}")
+    
+    def closeEvent(self, event):
+        """Clean up temporary files."""
+        if hasattr(self, 'temp_file_path'):
+            try:
+                os.unlink(self.temp_file_path)
+            except:
+                pass
+        super().closeEvent(event)
+
+
+class BlobFieldWidget(QWidget):
+    """Widget for BLOB field input with file browser."""
+    
+    def __init__(self, column_name: str, parent=None):
+        super().__init__(parent)
+        self.column_name = column_name
+        self.blob_data = None
+        self.setup_ui()
+    
+    def setup_ui(self):
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.file_label = QLabel("No file selected")
+        self.file_label.setStyleSheet("color: #6c757d; font-style: italic; padding: 8px;")
+        layout.addWidget(self.file_label)
+        
+        self.browse_btn = QPushButton("Browse...")
+        self.browse_btn.clicked.connect(self.browse_file)
+        self.browse_btn.setMaximumWidth(80)
+        layout.addWidget(self.browse_btn)
+    
+    def browse_file(self):
+        """Open file dialog to select file."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            f"Select file for {self.column_name}",
+            "",
+            "All Files (*);;Images (*.jpg *.jpeg *.png *.bmp *.gif *.tiff *.webp);;Documents (*.pdf *.txt *.doc *.docx);;Videos (*.mp4 *.avi *.mov *.mkv)"
+        )
+        
+        if file_path:
+            try:
+                with open(file_path, 'rb') as f:
+                    self.blob_data = f.read()
+                
+                filename = os.path.basename(file_path)
+                file_size = len(self.blob_data)
+                self.file_label.setText(f"Selected: {filename} ({file_size} bytes)")
+                self.file_label.setStyleSheet("color: #28a745; font-weight: 500; padding: 8px;")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to read file: {str(e)}")
+    
+    def get_value(self):
+        """Get the blob data."""
+        return self.blob_data
+
+
 class AddRowDialog(QDialog):
     """Dialog for adding new rows to a table."""
     
@@ -580,11 +862,17 @@ class AddRowDialog(QDialog):
             if column_name.lower() == 'rowid':
                 continue  # Skip rowid as it's auto-generated
             
-            line_edit = QLineEdit()
-            line_edit.setPlaceholderText(f"Enter {column_name} ({column_type})")
-            line_edit.setMinimumHeight(40)
-            self.field_widgets[column_name] = line_edit
-            form_layout.addRow(f"{column_name}:", line_edit)
+            # Use file browser for BLOB fields
+            if column_type.upper() == 'BLOB':
+                blob_widget = BlobFieldWidget(column_name)
+                self.field_widgets[column_name] = blob_widget
+                form_layout.addRow(f"{column_name}:", blob_widget)
+            else:
+                line_edit = QLineEdit()
+                line_edit.setPlaceholderText(f"Enter {column_name} ({column_type})")
+                line_edit.setMinimumHeight(40)
+                self.field_widgets[column_name] = line_edit
+                form_layout.addRow(f"{column_name}:", line_edit)
         
         layout.addLayout(form_layout)
         layout.addStretch()
@@ -601,8 +889,11 @@ class AddRowDialog(QDialog):
         """Get the data from the form fields."""
         data = {}
         for column_name, widget in self.field_widgets.items():
-            value = widget.text().strip()
-            data[column_name] = value if value else None
+            if isinstance(widget, BlobFieldWidget):
+                data[column_name] = widget.get_value()
+            else:
+                value = widget.text().strip()
+                data[column_name] = value if value else None
         return data
 
 
@@ -610,11 +901,13 @@ class TableWidget(QTableWidget):
     """Enhanced table widget with editing capabilities."""
     
     cell_changed_signal = pyqtSignal(int, int, str)
+    blob_changed_signal = pyqtSignal(int, int, bytes)
     
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setup_table()
         self.selected_rows = set()
+        self.column_types = {}
     
     def setup_table(self):
         """Setup table properties and styling."""
@@ -639,23 +932,115 @@ class TableWidget(QTableWidget):
         
         # Connect signals
         self.itemChanged.connect(self.on_item_changed)
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.show_context_menu)
     
     def on_item_changed(self, item):
         """Handle cell editing."""
-        if hasattr(item, 'original_value') and item.text() != item.original_value:
+        if hasattr(item, 'original_value') and item.text() != str(item.original_value):
             self.cell_changed_signal.emit(item.row(), item.column(), item.text())
             item.original_value = item.text()
     
-    def load_data(self, columns: List[str], rows: List[List[Any]]):
+    def show_context_menu(self, position):
+        """Show context menu for table items."""
+        item = self.itemAt(position)
+        if not item:
+            return
+        
+        column_name = self.horizontalHeaderItem(item.column()).text()
+        
+        if self.column_types.get(column_name, '').upper() == 'BLOB':
+            from PyQt5.QtWidgets import QMenu
+            menu = QMenu(self)
+            
+            blob_data = item.original_value
+            
+            if isinstance(blob_data, bytes) and blob_data:
+                view_action = menu.addAction("👁️ View")
+                view_action.triggered.connect(lambda: self.preview_blob(blob_data, column_name))
+                menu.addSeparator()
+            
+            browse_action = menu.addAction("📁 Browse & Replace")
+            browse_action.triggered.connect(lambda: self.browse_blob_file(item))
+            
+            if isinstance(blob_data, bytes) and blob_data:
+                save_action = menu.addAction("💾 Save As...")
+                save_action.triggered.connect(lambda: self.save_blob(blob_data, column_name))
+            
+            menu.exec_(self.mapToGlobal(position))
+    
+    def preview_blob(self, blob_data: bytes, column_name: str):
+        """Preview blob content."""
+        dialog = BlobPreviewDialog(blob_data, column_name, self)
+        dialog.exec_()
+    
+    def browse_blob_file(self, item):
+        """Browse for file to replace blob content."""
+        column_name = self.horizontalHeaderItem(item.column()).text()
+        
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            f"Select file for {column_name}",
+            "",
+            "All Files (*);;Images (*.jpg *.jpeg *.png *.bmp *.gif *.tiff *.webp);;Documents (*.pdf *.txt *.doc *.docx);;Videos (*.mp4 *.avi *.mov *.mkv)"
+        )
+        
+        if file_path:
+            try:
+                with open(file_path, 'rb') as f:
+                    blob_data = f.read()
+                
+                filename = os.path.basename(file_path)
+                
+                # Update display
+                item.setText(f"<BLOB: {len(blob_data)} bytes> {filename} [Right-click to view]")
+                item.original_value = blob_data
+                
+                # Emit signal for database update
+                self.blob_changed_signal.emit(item.row(), item.column(), blob_data)
+                
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to read file: {str(e)}")
+    
+    def save_blob(self, blob_data: bytes, column_name: str):
+        """Save blob data to file."""
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            f"Save {column_name}",
+            f"{column_name}_data",
+            "All Files (*)"
+        )
+        
+        if file_path:
+            try:
+                with open(file_path, 'wb') as f:
+                    f.write(blob_data)
+                QMessageBox.information(self, "Success", f"Data saved to {file_path}")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to save file: {str(e)}")
+    
+    def load_data(self, columns: List[str], rows: List[List[Any]], column_types: dict = None):
         """Load data into the table."""
         self.setRowCount(len(rows))
         self.setColumnCount(len(columns))
         self.setHorizontalHeaderLabels(columns)
+        self.column_types = column_types or {}
         
         for row_idx, row_data in enumerate(rows):
             for col_idx, cell_data in enumerate(row_data):
-                item = QTableWidgetItem(str(cell_data) if cell_data is not None else "")
-                item.original_value = str(cell_data) if cell_data is not None else ""
+                column_name = columns[col_idx]
+                
+                # Handle BLOB data display
+                if self.column_types.get(column_name, '').upper() == 'BLOB' and cell_data is not None:
+                    if isinstance(cell_data, bytes):
+                        display_text = f"<BLOB: {len(cell_data)} bytes> [Right-click to view]"
+                    else:
+                        display_text = str(cell_data)
+                else:
+                    display_text = str(cell_data) if cell_data is not None else ""
+                
+                item = QTableWidgetItem(display_text)
+                item.original_value = cell_data
                 self.setItem(row_idx, col_idx, item)
         
         # Resize columns to content but ensure minimum width for editing
@@ -819,6 +1204,7 @@ class SQLiteExplorer(QMainWindow):
         
         self.table_widget = TableWidget()
         self.table_widget.cell_changed_signal.connect(self.on_cell_changed)
+        self.table_widget.blob_changed_signal.connect(self.on_blob_changed)
         self.table_widget.itemSelectionChanged.connect(self.on_selection_changed)
         table_layout.addWidget(self.table_widget)
         
@@ -1176,8 +1562,8 @@ class SQLiteExplorer(QMainWindow):
     def load_table_data(self, table_name: str):
         """Load data for the selected table."""
         try:
-            columns, rows = self.db_manager.get_table_data(table_name)
-            self.table_widget.load_data(columns, rows)
+            columns, rows, column_types = self.db_manager.get_table_data(table_name)
+            self.table_widget.load_data(columns, rows, column_types)
             self.table_info_label.setText(f"📋 {table_name} ({len(rows)} rows, {len(columns)} columns)")
             self.statusBar().showMessage(f"Loaded {len(rows)} rows from table '{table_name}'")
         except Exception as e:
@@ -1210,6 +1596,31 @@ class SQLiteExplorer(QMainWindow):
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to update cell: {str(e)}")
+            # Reload table to revert changes
+            self.load_table_data(self.current_table)
+    
+    def on_blob_changed(self, row: int, col: int, blob_data: bytes):
+        """Handle BLOB cell editing."""
+        if not self.current_table:
+            return
+        
+        try:
+            # Get rowid from first column
+            rowid_item = self.table_widget.item(row, 0)
+            if not rowid_item:
+                return
+            
+            rowid = int(rowid_item.text())
+            
+            # Get column name from header
+            column_name = self.table_widget.horizontalHeaderItem(col).text()
+            
+            # Update database with blob data
+            self.db_manager.update_cell(self.current_table, rowid, column_name, blob_data)
+            self.statusBar().showMessage(f"Updated BLOB {column_name} in row {rowid}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to update BLOB cell: {str(e)}")
             # Reload table to revert changes
             self.load_table_data(self.current_table)
     
@@ -1332,6 +1743,7 @@ class SQLiteExplorer(QMainWindow):
             "• View and edit table data\n"
             "• Add and delete rows\n"
             "• SQLCipher encrypted database support\n"
+            "• BLOB preview for images, PDFs, and text\n"
             "• Sort columns by clicking headers\n"
             "• Clean, responsive interface\n\n"
             "Built with PyQt5"
