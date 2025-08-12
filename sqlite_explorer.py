@@ -68,6 +68,13 @@ try:
 except ImportError:
     PIL_AVAILABLE = False
 
+# Try to import PyMuPDF for PDF preview
+try:
+    import fitz  # PyMuPDF
+    PYMUPDF_AVAILABLE = True
+except ImportError:
+    PYMUPDF_AVAILABLE = False
+
 # Try to import pysqlcipher3 for encrypted database support
 try:
     from pysqlcipher3 import dbapi2 as sqlcipher
@@ -613,19 +620,24 @@ class BlobPreviewDialog(QDialog):
         self.resize(800, 600)
         
         layout = QVBoxLayout(self)
+        layout.setSpacing(0)
         
-        # Header
+        # Fixed header - won't expand
         header = QLabel(f"Content Preview - {self.column_name} ({len(self.blob_data)} bytes)")
         header.setFont(QFont("Segoe UI", 12, QFont.Bold))
         header.setStyleSheet("color: #2c3e50; padding: 10px; background: #f8f9fa; border-radius: 6px;")
+        header.setFixedHeight(50)
         layout.addWidget(header)
         
-        # Content area
+        # Expandable content area - this will grow when dialog is resized
         self.content_widget = self.create_content_widget()
-        layout.addWidget(self.content_widget)
+        layout.addWidget(self.content_widget, 1)  # stretch factor = 1
         
-        # Buttons
+        # Fixed buttons - won't expand
         button_layout = QHBoxLayout()
+        button_widget = QWidget()
+        button_widget.setLayout(button_layout)
+        button_widget.setFixedHeight(50)
         
         save_btn = QPushButton("Save As...")
         save_btn.clicked.connect(self.save_blob)
@@ -637,7 +649,7 @@ class BlobPreviewDialog(QDialog):
         close_btn.clicked.connect(self.accept)
         button_layout.addWidget(close_btn)
         
-        layout.addLayout(button_layout)
+        layout.addWidget(button_widget)
     
     def create_content_widget(self) -> QWidget:
         """Create appropriate widget based on blob content type."""
@@ -655,6 +667,8 @@ class BlobPreviewDialog(QDialog):
             return self.create_audio_widget()
         elif content_type == 'pdf':
             return self.create_pdf_widget()
+        elif content_type == 'document':
+            return self.create_document_widget()
         else:
             return self.create_hex_widget()
     
@@ -676,20 +690,37 @@ class BlobPreviewDialog(QDialog):
             return 'image'
         
         # Check for video formats
-        elif (self.blob_data.startswith(b'\x00\x00\x00\x18ftypmp4') or  # MP4
-              self.blob_data.startswith(b'\x00\x00\x00\x20ftypmp4')):
+        elif (self.blob_data.startswith(b'\x00\x00\x00\x18ftyp') or  # MP4, MOV, M4V
+              self.blob_data.startswith(b'\x00\x00\x00\x20ftyp') or
+              self.blob_data.startswith(b'\x1a\x45\xdf\xa3') or  # MKV/WebM
+              self.blob_data.startswith(b'RIFF') and b'AVI ' in self.blob_data[:12] or  # AVI
+              self.blob_data.startswith(b'\x00\x00\x01\xba') or  # MPEG
+              self.blob_data.startswith(b'FLV\x01')):  # FLV
             return 'video'
         
         # Check for audio formats
         elif (self.blob_data.startswith(b'ID3') or  # MP3 with ID3
               self.blob_data.startswith(b'\xff\xfb') or  # MP3
               self.blob_data.startswith(b'\xff\xf3') or  # MP3
-              self.blob_data.startswith(b'\xff\xf2')):  # MP3
+              self.blob_data.startswith(b'\xff\xf2') or  # MP3
+              self.blob_data.startswith(b'\x00\x00\x00\x20ftypM4A') or  # M4A
+              self.blob_data.startswith(b'fLaC') or  # FLAC
+              self.blob_data.startswith(b'OggS') or  # OGG/Vorbis
+              self.blob_data.startswith(b'RIFF') and b'WAVE' in self.blob_data[:12] or  # WAV
+              self.blob_data.startswith(b'wvpk') or  # WavPack
+              self.blob_data.startswith(b'MAC ')):  # APE
             return 'audio'
         
-        # Check for PDF
+        # Check for document formats
         elif self.blob_data.startswith(b'%PDF'):  # PDF
             return 'pdf'
+        elif (self.blob_data.startswith(b'PK\x03\x04') and  # ZIP-based formats
+              (b'word/' in self.blob_data[:1000] or b'xl/' in self.blob_data[:1000] or
+               b'ppt/' in self.blob_data[:1000] or b'content.xml' in self.blob_data[:1000])):
+            return 'document'
+        elif (self.blob_data.startswith(b'\xd0\xcf\x11\xe0') or  # DOC, XLS, PPT
+              self.blob_data.startswith(b'{\\rtf')):
+            return 'document'
         
         # Check if it's text (UTF-8)
         try:
@@ -782,18 +813,35 @@ class BlobPreviewDialog(QDialog):
         layout = QVBoxLayout(widget)
         
         try:
-            logger.debug("Creating temporary file for video")
-            with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_file:
+            # Detect video format and use appropriate extension
+            video_ext = self.get_video_extension()
+            logger.debug(f"Creating temporary file for video with extension: {video_ext}")
+            with tempfile.NamedTemporaryFile(suffix=video_ext, delete=False) as temp_file:
                 temp_file.write(self.blob_data)
                 temp_path = temp_file.name
             logger.debug(f"Temporary video file created: {temp_path}")
             
             logger.debug("Creating QVideoWidget and QMediaPlayer")
+            
+            # Fixed format info header
+            format_info = self.get_video_format_info()
+            info_header = QLabel(f"{format_info['icon']} {format_info['name']} | {format_info['description']}")
+            info_header.setStyleSheet("font-size: 12px; padding: 8px; background: #e8f5e8; border-radius: 6px; margin-bottom: 5px;")
+            info_header.setAlignment(Qt.AlignCenter)
+            info_header.setFixedHeight(35)
+            layout.addWidget(info_header)
+            
+            # Expandable video widget - grows with dialog
             self.video_widget = QVideoWidget()
             self.media_player = QMediaPlayer(None, QMediaPlayer.VideoSurface)
             self.media_player.setVideoOutput(self.video_widget)
             
-            layout.addWidget(self.video_widget)
+            layout.addWidget(self.video_widget, 1)  # stretch factor = 1
+            
+            # Fixed controls area - won't expand
+            controls_widget = QWidget()
+            controls_widget.setFixedHeight(80)
+            controls_main_layout = QVBoxLayout(controls_widget)
             
             # Playback controls
             controls_layout = QHBoxLayout()
@@ -827,7 +875,7 @@ class BlobPreviewDialog(QDialog):
             self.time_label.setMinimumWidth(80)
             controls_layout.addWidget(self.time_label)
             
-            layout.addLayout(controls_layout)
+            controls_main_layout.addLayout(controls_layout)
             
             # Speed control
             speed_layout = QHBoxLayout()
@@ -840,7 +888,9 @@ class BlobPreviewDialog(QDialog):
             speed_layout.addWidget(self.speed_combo)
             
             speed_layout.addStretch()
-            layout.addLayout(speed_layout)
+            controls_main_layout.addLayout(speed_layout)
+            
+            layout.addWidget(controls_widget)
             
             # Connect media player signals
             self.media_player.positionChanged.connect(self.on_position_changed)
@@ -864,15 +914,20 @@ class BlobPreviewDialog(QDialog):
         layout = QVBoxLayout(widget)
         
         try:
-            logger.debug("Creating temporary file for audio")
-            with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as temp_file:
+            # Detect audio format and use appropriate extension
+            audio_ext = self.get_audio_extension()
+            logger.debug(f"Creating temporary file for audio with extension: {audio_ext}")
+            with tempfile.NamedTemporaryFile(suffix=audio_ext, delete=False) as temp_file:
                 temp_file.write(self.blob_data)
                 temp_path = temp_file.name
             logger.debug(f"Temporary audio file created: {temp_path}")
             
-            info_label = QLabel(f"🎵 Audio File ({len(self.blob_data)} bytes)")
-            info_label.setStyleSheet("font-size: 14px; padding: 20px; text-align: center;")
+            # Fixed format-specific info
+            format_info = self.get_audio_format_info()
+            info_label = QLabel(f"{format_info['icon']} {format_info['name']}\n{len(self.blob_data)} bytes | {format_info['description']}")
+            info_label.setStyleSheet("font-size: 14px; padding: 20px; text-align: center; background: #f0f8ff; border-radius: 8px; margin: 10px;")
             info_label.setAlignment(Qt.AlignCenter)
+            info_label.setFixedHeight(100)
             layout.addWidget(info_label)
             
             logger.debug("Creating QMediaPlayer for audio")
@@ -897,9 +952,14 @@ class BlobPreviewDialog(QDialog):
             controls_layout.addWidget(stop_btn)
             
             controls_layout.addStretch()
-            layout.addLayout(controls_layout)
             
-            layout.addStretch()
+            # Fixed controls area
+            controls_widget = QWidget()
+            controls_widget.setLayout(controls_layout)
+            controls_widget.setFixedHeight(60)
+            layout.addWidget(controls_widget)
+            
+            layout.addStretch(1)  # This expands to fill space
             
             logger.debug("Loading audio media")
             self.media_player.setMedia(QMediaContent(QUrl.fromLocalFile(temp_path)))
@@ -938,17 +998,146 @@ class BlobPreviewDialog(QDialog):
                 temp_file.write(self.blob_data)
                 temp_path = temp_file.name
             
-            # Use QWebEngineView to display PDF
-            web_view = QWebEngineView()
-            web_view.load(QUrl.fromLocalFile(temp_path))
-            layout.addWidget(web_view)
+            # PDF header info
+            header = QLabel(f"📄 PDF Document ({len(self.blob_data)} bytes)")
+            header.setStyleSheet("font-size: 14px; font-weight: bold; padding: 10px; background: #ffebee; border-radius: 6px;")
+            layout.addWidget(header)
+            
+            # Try to render PDF preview if PyMuPDF is available
+            if PYMUPDF_AVAILABLE:
+                try:
+                    pdf_preview = self.create_pdf_preview(temp_path)
+                    if pdf_preview:
+                        layout.addWidget(pdf_preview)
+                    else:
+                        layout.addWidget(self.create_pdf_fallback(temp_path))
+                except:
+                    layout.addWidget(self.create_pdf_fallback(temp_path))
+            else:
+                layout.addWidget(self.create_pdf_fallback(temp_path))
             
             # Store temp file for cleanup
             self.temp_files.append(temp_path)
+            
         except Exception as e:
             layout.addWidget(QLabel(f"Error loading PDF: {str(e)}"))
         
         return widget
+    
+    def open_pdf_externally(self, pdf_path: str):
+        """Open PDF with system default viewer."""
+        try:
+            import subprocess
+            import platform
+            
+            system = platform.system()
+            if system == "Darwin":  # macOS
+                subprocess.run(["open", pdf_path])
+            elif system == "Windows":
+                subprocess.run(["start", pdf_path], shell=True)
+            else:  # Linux
+                subprocess.run(["xdg-open", pdf_path])
+                
+            logger.debug(f"Opened PDF externally: {pdf_path}")
+        except Exception as e:
+            logger.error(f"Failed to open PDF externally: {e}")
+            QMessageBox.warning(self, "Error", f"Could not open PDF: {str(e)}\n\nPlease use 'Save As...' instead.")
+    
+    def create_pdf_preview(self, pdf_path: str) -> QWidget:
+        """Create PDF preview using PyMuPDF."""
+        try:
+            import fitz
+            doc = fitz.open(pdf_path)
+            
+            if len(doc) == 0:
+                return None
+                
+            preview_widget = QWidget()
+            preview_layout = QVBoxLayout(preview_widget)
+            
+            # Fixed PDF info header
+            info_label = QLabel(f"📄 PDF Preview - {len(doc)} page(s)")
+            info_label.setStyleSheet("font-size: 14px; font-weight: bold; padding: 8px; background: #e8f5e8; border-radius: 4px;")
+            info_label.setFixedHeight(40)
+            preview_layout.addWidget(info_label)
+            
+            # Render first page
+            page = doc[0]
+            mat = fitz.Matrix(1.5, 1.5)  # Scale factor
+            pix = page.get_pixmap(matrix=mat)
+            img_data = pix.tobytes("png")
+            
+            # Display page image
+            pixmap = QPixmap()
+            pixmap.loadFromData(img_data)
+            
+            # Scale to fit
+            scaled_pixmap = pixmap.scaled(600, 800, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            
+            page_label = QLabel()
+            page_label.setPixmap(scaled_pixmap)
+            page_label.setAlignment(Qt.AlignCenter)
+            page_label.setStyleSheet("border: 1px solid #ddd; background: white; margin: 10px;")
+            
+            # Expandable scroll area - this grows with dialog
+            scroll = QScrollArea()
+            scroll.setWidget(page_label)
+            scroll.setWidgetResizable(True)
+            preview_layout.addWidget(scroll, 1)  # stretch factor = 1
+            
+            # Fixed button area
+            open_btn = QPushButton("🔍 Open Full PDF")
+            open_btn.setStyleSheet("padding: 8px; background: #007bff; color: white; border-radius: 4px;")
+            open_btn.setFixedHeight(35)
+            open_btn.clicked.connect(lambda: self.open_pdf_externally(pdf_path))
+            preview_layout.addWidget(open_btn)
+            
+            doc.close()
+            return preview_widget
+            
+        except Exception as e:
+            logger.error(f"PDF preview error: {e}")
+            return None
+    
+    def create_pdf_fallback(self, pdf_path: str) -> QWidget:
+        """Create fallback PDF widget when preview is not available."""
+        info_widget = QWidget()
+        info_layout = QVBoxLayout(info_widget)
+        
+        # PDF icon and info
+        pdf_icon = QLabel("📄 PDF Document")
+        pdf_icon.setStyleSheet("font-size: 24px; text-align: center; padding: 20px;")
+        pdf_icon.setAlignment(Qt.AlignCenter)
+        info_layout.addWidget(pdf_icon)
+        
+        # File size info
+        size_mb = len(self.blob_data) / (1024 * 1024)
+        size_info = QLabel(f"Size: {len(self.blob_data):,} bytes ({size_mb:.2f} MB)")
+        size_info.setAlignment(Qt.AlignCenter)
+        size_info.setStyleSheet("color: #666; margin: 10px;")
+        info_layout.addWidget(size_info)
+        
+        # Open button
+        open_btn = QPushButton("🔍 Open PDF in System Viewer")
+        open_btn.setStyleSheet("padding: 12px; font-size: 14px; background: #dc3545; color: white; border-radius: 6px;")
+        open_btn.clicked.connect(lambda: self.open_pdf_externally(pdf_path))
+        info_layout.addWidget(open_btn)
+        
+        # Instructions
+        instructions = QLabel("Click above to open PDF in your default PDF viewer\nor use 'Save As...' to save the file")
+        instructions.setAlignment(Qt.AlignCenter)
+        instructions.setStyleSheet("color: #666; font-style: italic; margin: 15px; padding: 10px;")
+        info_layout.addWidget(instructions)
+        
+        # PyMuPDF installation hint
+        if not PYMUPDF_AVAILABLE:
+            hint = QLabel("💡 Install PyMuPDF for PDF preview: pip install PyMuPDF")
+            hint.setAlignment(Qt.AlignCenter)
+            hint.setStyleSheet("color: #007bff; font-size: 11px; font-style: italic; margin: 10px;")
+            info_layout.addWidget(hint)
+        
+        info_layout.addStretch()
+        return info_widget
     
     def create_hex_widget(self) -> QWidget:
         """Create widget for hex dump preview."""
@@ -982,20 +1171,222 @@ class BlobPreviewDialog(QDialog):
         
         return '\n'.join(lines)
     
+    def get_audio_extension(self) -> str:
+        """Get appropriate file extension for audio format."""
+        if self.blob_data.startswith(b'\x00\x00\x00\x20ftypM4A'):
+            return '.m4a'
+        elif self.blob_data.startswith(b'fLaC'):
+            return '.flac'
+        elif self.blob_data.startswith(b'OggS'):
+            return '.ogg'
+        elif self.blob_data.startswith(b'RIFF') and b'WAVE' in self.blob_data[:12]:
+            return '.wav'
+        elif self.blob_data.startswith(b'wvpk'):
+            return '.wv'
+        elif self.blob_data.startswith(b'MAC '):
+            return '.ape'
+        else:
+            return '.mp3'  # Default
+    
+    def get_audio_format_info(self) -> dict:
+        """Get detailed audio format information."""
+        if self.blob_data.startswith(b'\x00\x00\x00\x20ftypM4A'):
+            return {'icon': '🎵', 'name': 'M4A Audio', 'description': 'Apple AAC Format | High Quality'}
+        elif self.blob_data.startswith(b'fLaC'):
+            return {'icon': '🎼', 'name': 'FLAC Audio', 'description': 'Lossless Compression | Audiophile Quality'}
+        elif self.blob_data.startswith(b'OggS'):
+            return {'icon': '🎶', 'name': 'OGG Vorbis', 'description': 'Open Source | Web Optimized'}
+        elif self.blob_data.startswith(b'RIFF') and b'WAVE' in self.blob_data[:12]:
+            return {'icon': '🎧', 'name': 'WAV Audio', 'description': 'Uncompressed | Studio Quality'}
+        elif self.blob_data.startswith(b'wvpk'):
+            return {'icon': '🎵', 'name': 'WavPack', 'description': 'Lossless | Hybrid Compression'}
+        elif self.blob_data.startswith(b'MAC '):
+            return {'icon': '🎵', 'name': 'APE Audio', 'description': "Monkey's Audio | Lossless"}
+        else:
+            return {'icon': '🎵', 'name': 'MP3 Audio', 'description': 'MPEG Layer 3 | Universal Format'}
+    
+    def get_video_extension(self) -> str:
+        """Get appropriate file extension for video format."""
+        if self.blob_data.startswith(b'\x1a\x45\xdf\xa3'):
+            return '.mkv'
+        elif self.blob_data.startswith(b'RIFF') and b'AVI ' in self.blob_data[:12]:
+            return '.avi'
+        elif self.blob_data.startswith(b'\x00\x00\x01\xba'):
+            return '.mpg'
+        elif self.blob_data.startswith(b'FLV\x01'):
+            return '.flv'
+        elif b'ftypqt' in self.blob_data[:20]:
+            return '.mov'
+        else:
+            return '.mp4'  # Default
+    
+    def get_video_format_info(self) -> dict:
+        """Get detailed video format information."""
+        if self.blob_data.startswith(b'\x1a\x45\xdf\xa3'):
+            return {'icon': '🎥', 'name': 'MKV Video', 'description': 'Matroska Container | Open Standard'}
+        elif self.blob_data.startswith(b'RIFF') and b'AVI ' in self.blob_data[:12]:
+            return {'icon': '🎥', 'name': 'AVI Video', 'description': 'Audio Video Interleave | Legacy Format'}
+        elif self.blob_data.startswith(b'\x00\x00\x01\xba'):
+            return {'icon': '🎥', 'name': 'MPEG Video', 'description': 'MPEG Standard | Broadcast Quality'}
+        elif self.blob_data.startswith(b'FLV\x01'):
+            return {'icon': '🎥', 'name': 'FLV Video', 'description': 'Flash Video | Web Streaming'}
+        elif b'ftypqt' in self.blob_data[:20]:
+            return {'icon': '🎥', 'name': 'MOV Video', 'description': 'QuickTime | Apple Format'}
+        else:
+            return {'icon': '🎥', 'name': 'MP4 Video', 'description': 'MPEG-4 | Universal Standard'}
+    
+    def create_document_widget(self) -> QWidget:
+        """Create widget for document preview."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        try:
+            # Detect document type and create appropriate viewer
+            if b'word/' in self.blob_data[:1000] or self.blob_data.startswith(b'\xd0\xcf\x11\xe0'):
+                return self.create_office_viewer("📄 Word Document", '.docx')
+            elif b'xl/' in self.blob_data[:1000]:
+                return self.create_office_viewer("📊 Excel Spreadsheet", '.xlsx')
+            elif b'ppt/' in self.blob_data[:1000]:
+                return self.create_office_viewer("📽️ PowerPoint Presentation", '.pptx')
+            elif b'content.xml' in self.blob_data[:1000]:
+                return self.create_office_viewer("📝 OpenDocument", '.odt')
+            elif self.blob_data.startswith(b'{\\rtf'):
+                return self.create_rtf_viewer()
+            else:
+                layout.addWidget(QLabel("📄 Unknown Document Format"))
+                
+        except Exception as e:
+            layout.addWidget(QLabel(f"Error loading document: {str(e)}"))
+        
+        return widget
+    
+    def create_office_viewer(self, doc_type: str, ext: str) -> QWidget:
+        """Create viewer for Office/OpenDocument formats."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Header
+        header = QLabel(f"{doc_type} ({len(self.blob_data)} bytes)")
+        header.setStyleSheet("font-size: 14px; font-weight: bold; padding: 10px; background: #e3f2fd; border-radius: 6px;")
+        layout.addWidget(header)
+        
+        # Document preview info
+        info_widget = QWidget()
+        info_layout = QVBoxLayout(info_widget)
+        info_layout.setSpacing(15)
+        
+        # Document icon and type
+        type_label = QLabel(f"📄 {doc_type}")
+        type_label.setStyleSheet("font-size: 18px; font-weight: bold; text-align: center; padding: 20px;")
+        type_label.setAlignment(Qt.AlignCenter)
+        info_layout.addWidget(type_label)
+        
+        # File info
+        size_mb = len(self.blob_data) / (1024 * 1024)
+        info_text = f"File Size: {len(self.blob_data):,} bytes ({size_mb:.2f} MB)"
+        size_label = QLabel(info_text)
+        size_label.setAlignment(Qt.AlignCenter)
+        size_label.setStyleSheet("color: #666; font-size: 12px;")
+        info_layout.addWidget(size_label)
+        
+        # Instructions
+        instruction_label = QLabel("💾 Click 'Save As...' to save and open with:")
+        instruction_label.setAlignment(Qt.AlignCenter)
+        instruction_label.setStyleSheet("font-size: 14px; margin: 20px 0 10px 0;")
+        info_layout.addWidget(instruction_label)
+        
+        # Application list
+        apps_text = "• Microsoft Office\n• LibreOffice\n• Google Docs (upload)\n• Apple iWork"
+        apps_label = QLabel(apps_text)
+        apps_label.setAlignment(Qt.AlignCenter)
+        apps_label.setStyleSheet("background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #dee2e6;")
+        info_layout.addWidget(apps_label)
+        
+        info_layout.addStretch()
+        layout.addWidget(info_widget)
+        
+        return widget
+    
+    def create_rtf_viewer(self) -> QWidget:
+        """Create viewer for RTF documents."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        try:
+            # Try to extract plain text from RTF
+            rtf_content = self.blob_data.decode('utf-8', errors='ignore')
+            
+            # Simple RTF to plain text conversion
+            import re
+            # Remove RTF control codes
+            text = re.sub(r'\\[a-z]+\d*\s?', '', rtf_content)
+            text = re.sub(r'[{}]', '', text)
+            text = text.replace('\\', '').strip()
+            
+            header = QLabel("📄 Rich Text Format Document")
+            header.setStyleSheet("font-size: 14px; font-weight: bold; padding: 10px; background: #fff3cd; border-radius: 6px;")
+            layout.addWidget(header)
+            
+            text_edit = QTextEdit()
+            text_edit.setPlainText(text[:5000] + ("..." if len(text) > 5000 else ""))
+            text_edit.setReadOnly(True)
+            layout.addWidget(text_edit)
+            
+        except Exception as e:
+            layout.addWidget(QLabel(f"📄 RTF Document\nError parsing: {str(e)}"))
+        
+        return widget
+    
     def save_blob(self):
-        """Save blob data to file."""
+        """Save blob data to file with proper extension."""
+        # Detect content type and suggest appropriate extension
+        content_type = self.detect_content_type()
+        default_name = f"{self.column_name}_data"
+        
+        if content_type == 'pdf':
+            default_name += '.pdf'
+            file_filter = "PDF Files (*.pdf);;All Files (*)"
+        elif content_type == 'image':
+            if self.blob_data.startswith(b'\xff\xd8\xff'):
+                default_name += '.jpg'
+            elif self.blob_data.startswith(b'\x89PNG'):
+                default_name += '.png'
+            else:
+                default_name += '.img'
+            file_filter = "Image Files (*.jpg *.png *.gif *.bmp);;All Files (*)"
+        elif content_type == 'video':
+            default_name += self.get_video_extension()
+            file_filter = "Video Files (*.mp4 *.avi *.mov *.mkv);;All Files (*)"
+        elif content_type == 'audio':
+            default_name += self.get_audio_extension()
+            file_filter = "Audio Files (*.mp3 *.wav *.m4a *.flac);;All Files (*)"
+        elif content_type == 'document':
+            if b'word/' in self.blob_data[:1000]:
+                default_name += '.docx'
+            elif b'xl/' in self.blob_data[:1000]:
+                default_name += '.xlsx'
+            elif b'ppt/' in self.blob_data[:1000]:
+                default_name += '.pptx'
+            elif b'content.xml' in self.blob_data[:1000]:
+                default_name += '.odt'
+            else:
+                default_name += '.doc'
+            file_filter = "Document Files (*.docx *.xlsx *.pptx *.odt *.doc);;All Files (*)"
+        else:
+            file_filter = "All Files (*)"
+        
         file_path, _ = QFileDialog.getSaveFileName(
             self,
-            "Save Blob Data",
-            f"{self.column_name}_data",
-            "All Files (*)"
+            "Save File",
+            default_name,
+            file_filter
         )
         
         if file_path:
             try:
                 with open(file_path, 'wb') as f:
                     f.write(self.blob_data)
-                QMessageBox.information(self, "Success", f"Data saved to {file_path}")
+                QMessageBox.information(self, "Success", f"File saved to {file_path}")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to save file: {str(e)}")
     
@@ -1132,7 +1523,7 @@ class BlobFieldWidget(QWidget):
             self,
             f"Select file for {self.column_name}",
             "",
-            "All Files (*);;Images (*.jpg *.jpeg *.png *.bmp *.gif *.tiff *.webp);;Documents (*.pdf *.txt *.md *.doc *.docx);;Videos (*.mp4 *.avi *.mov *.mkv);;Audio (*.mp3 *.wav *.m4a)"
+            "All Files (*);;Images (*.jpg *.jpeg *.png *.bmp *.gif *.tiff *.webp);;Documents (*.pdf *.txt *.md *.doc *.docx *.xlsx *.pptx *.odt *.rtf);;Videos (*.mp4 *.avi *.mov *.mkv *.mpg *.flv *.webm);;Audio (*.mp3 *.wav *.m4a *.flac *.ogg *.wv *.ape)"
         )
         
         if file_path:
@@ -1350,7 +1741,7 @@ class TableWidget(QTableWidget):
             self,
             f"Select file for {column_name}",
             "",
-            "All Files (*);;Images (*.jpg *.jpeg *.png *.bmp *.gif *.tiff *.webp);;Documents (*.pdf *.txt *.md *.doc *.docx);;Videos (*.mp4 *.avi *.mov *.mkv);;Audio (*.mp3 *.wav *.m4a)"
+            "All Files (*);;Images (*.jpg *.jpeg *.png *.bmp *.gif *.tiff *.webp);;Documents (*.pdf *.txt *.md *.doc *.docx *.xlsx *.pptx *.odt *.rtf);;Videos (*.mp4 *.avi *.mov *.mkv *.mpg *.flv *.webm);;Audio (*.mp3 *.wav *.m4a *.flac *.ogg *.wv *.ape)"
         )
         
         if file_path:
@@ -1371,19 +1762,54 @@ class TableWidget(QTableWidget):
                 QMessageBox.critical(self, "Error", f"Failed to read file: {str(e)}")
     
     def save_blob(self, blob_data: bytes, column_name: str):
-        """Save blob data to file."""
+        """Save blob data to file with proper extension."""
+        # Create temporary dialog to detect content type
+        temp_dialog = BlobPreviewDialog(blob_data, column_name, self)
+        content_type = temp_dialog.detect_content_type()
+        
+        default_name = f"{column_name}_data"
+        if content_type == 'pdf':
+            default_name += '.pdf'
+            file_filter = "PDF Files (*.pdf);;All Files (*)"
+        elif content_type == 'image':
+            if blob_data.startswith(b'\xff\xd8\xff'):
+                default_name += '.jpg'
+            elif blob_data.startswith(b'\x89PNG'):
+                default_name += '.png'
+            else:
+                default_name += '.img'
+            file_filter = "Image Files (*.jpg *.png *.gif *.bmp);;All Files (*)"
+        elif content_type == 'video':
+            default_name += temp_dialog.get_video_extension()
+            file_filter = "Video Files (*.mp4 *.avi *.mov *.mkv);;All Files (*)"
+        elif content_type == 'audio':
+            default_name += temp_dialog.get_audio_extension()
+            file_filter = "Audio Files (*.mp3 *.wav *.m4a *.flac);;All Files (*)"
+        elif content_type == 'document':
+            if b'word/' in blob_data[:1000]:
+                default_name += '.docx'
+            elif b'xl/' in blob_data[:1000]:
+                default_name += '.xlsx'
+            elif b'ppt/' in blob_data[:1000]:
+                default_name += '.pptx'
+            else:
+                default_name += '.doc'
+            file_filter = "Document Files (*.docx *.xlsx *.pptx *.odt);;All Files (*)"
+        else:
+            file_filter = "All Files (*)"
+        
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             f"Save {column_name}",
-            f"{column_name}_data",
-            "All Files (*)"
+            default_name,
+            file_filter
         )
         
         if file_path:
             try:
                 with open(file_path, 'wb') as f:
                     f.write(blob_data)
-                QMessageBox.information(self, "Success", f"Data saved to {file_path}")
+                QMessageBox.information(self, "Success", f"File saved to {file_path}")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to save file: {str(e)}")
     
