@@ -53,6 +53,8 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QUrl
 from PyQt5.QtGui import QFont, QIcon, QPalette, QColor, QPixmap
 from PyQt5.QtWebEngineWidgets import QWebEngineView
+from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
+from PyQt5.QtMultimediaWidgets import QVideoWidget
 
 # Try to import PIL for image processing
 try:
@@ -202,16 +204,42 @@ class DatabaseManager:
         if not self.connection:
             raise Exception("No database connection")
         
-        columns = list(data.keys())
-        values = list(data.values())
+        # Filter out None values
+        filtered_data = {k: v for k, v in data.items() if v is not None}
+        
+        if not filtered_data:
+            return False
+        
+        print(f"DEBUG INSERT: table={table_name}, data keys={list(filtered_data.keys())}")
+        sys.stdout.flush()
+        
+        columns = list(filtered_data.keys())
+        values = []
+        
+        # Process values, converting bytes to sqlite3.Binary
+        for k, v in filtered_data.items():
+            if isinstance(v, bytes):
+                print(f"DEBUG INSERT: Column {k} is BLOB with {len(v)} bytes")
+                values.append(sqlite3.Binary(v))
+            else:
+                print(f"DEBUG INSERT: Column {k} is {type(v)} with value {repr(v)[:50]}")
+                values.append(v)
+        
         placeholders = ', '.join(['?' for _ in values])
         column_names = ', '.join(columns)
         
         query = f"INSERT INTO {table_name} ({column_names}) VALUES ({placeholders})"
+        print(f"DEBUG INSERT: Query={query}")
         
         cursor = self.connection.cursor()
         cursor.execute(query, values)
         self.connection.commit()
+        
+        # Get the inserted row ID and verify
+        rowid = cursor.lastrowid
+        print(f"DEBUG INSERT: Inserted with rowid={rowid}")
+        
+        cursor.close()
         return True
     
     def update_cell(self, table_name: str, rowid: int, column: str, value: Any) -> bool:
@@ -219,10 +247,30 @@ class DatabaseManager:
         if not self.connection:
             raise Exception("No database connection")
         
-        query = f"UPDATE {table_name} SET {column} = ? WHERE rowid = ?"
         cursor = self.connection.cursor()
-        cursor.execute(query, (value, rowid))
+        
+        # Debug logging
+        print(f"DEBUG UPDATE: table={table_name}, rowid={rowid}, column={column}")
+        print(f"DEBUG UPDATE: value type={type(value)}, length={len(value) if hasattr(value, '__len__') else 'N/A'}")
+        sys.stdout.flush()
+        
+        # Handle BLOB data with proper SQLite BLOB support
+        if isinstance(value, bytes):
+            query = f"UPDATE {table_name} SET {column} = ? WHERE rowid = ?"
+            print(f"DEBUG UPDATE: Using sqlite3.Binary for BLOB data")
+            cursor.execute(query, (sqlite3.Binary(value), rowid))
+        else:
+            query = f"UPDATE {table_name} SET {column} = ? WHERE rowid = ?"
+            cursor.execute(query, (value, rowid))
+        
         self.connection.commit()
+        
+        # Verify the update
+        cursor.execute(f"SELECT {column} FROM {table_name} WHERE rowid = ?", (rowid,))
+        result = cursor.fetchone()
+        print(f"DEBUG UPDATE VERIFY: Retrieved data type={type(result[0]) if result else 'None'}, length={len(result[0]) if result and hasattr(result[0], '__len__') else 'N/A'}")
+        
+        cursor.close()
         return True
     
     def delete_rows(self, table_name: str, rowids: List[int]) -> bool:
@@ -592,6 +640,12 @@ class BlobPreviewDialog(QDialog):
             return self.create_image_widget()
         elif content_type == 'text':
             return self.create_text_widget()
+        elif content_type == 'markdown':
+            return self.create_markdown_widget()
+        elif content_type == 'video':
+            return self.create_video_widget()
+        elif content_type == 'audio':
+            return self.create_audio_widget()
         elif content_type == 'pdf':
             return self.create_pdf_widget()
         else:
@@ -614,13 +668,30 @@ class BlobPreviewDialog(QDialog):
         elif self.blob_data.startswith(b'RIFF') and b'WEBP' in self.blob_data[:12]:  # WebP
             return 'image'
         
+        # Check for video formats
+        elif (self.blob_data.startswith(b'\x00\x00\x00\x18ftypmp4') or  # MP4
+              self.blob_data.startswith(b'\x00\x00\x00\x20ftypmp4')):
+            return 'video'
+        
+        # Check for audio formats
+        elif (self.blob_data.startswith(b'ID3') or  # MP3 with ID3
+              self.blob_data.startswith(b'\xff\xfb') or  # MP3
+              self.blob_data.startswith(b'\xff\xf3') or  # MP3
+              self.blob_data.startswith(b'\xff\xf2')):  # MP3
+            return 'audio'
+        
         # Check for PDF
         elif self.blob_data.startswith(b'%PDF'):  # PDF
             return 'pdf'
         
         # Check if it's text (UTF-8)
         try:
-            self.blob_data.decode('utf-8')
+            text_content = self.blob_data.decode('utf-8')
+            # Check if it's markdown
+            if ('# ' in text_content or '## ' in text_content or 
+                '**' in text_content or '*' in text_content or
+                '[' in text_content and '](' in text_content):
+                return 'markdown'
             return 'text'
         except UnicodeDecodeError:
             pass
@@ -679,6 +750,127 @@ class BlobPreviewDialog(QDialog):
             layout.addWidget(QLabel(f"Error decoding text: {str(e)}"))
         
         return widget
+    
+    def create_markdown_widget(self) -> QWidget:
+        """Create widget for markdown preview."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        try:
+            markdown_content = self.blob_data.decode('utf-8')
+            html_content = self.markdown_to_html(markdown_content)
+            
+            web_view = QWebEngineView()
+            web_view.setHtml(html_content)
+            layout.addWidget(web_view)
+        except Exception as e:
+            layout.addWidget(QLabel(f"Error rendering markdown: {str(e)}"))
+        
+        return widget
+    
+    def create_video_widget(self) -> QWidget:
+        """Create widget for video preview."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        try:
+            with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_file:
+                temp_file.write(self.blob_data)
+                temp_path = temp_file.name
+            
+            self.video_widget = QVideoWidget()
+            self.media_player = QMediaPlayer()
+            self.media_player.setVideoOutput(self.video_widget)
+            
+            layout.addWidget(self.video_widget)
+            
+            controls_layout = QHBoxLayout()
+            
+            play_btn = QPushButton("▶️ Play")
+            play_btn.clicked.connect(self.media_player.play)
+            controls_layout.addWidget(play_btn)
+            
+            pause_btn = QPushButton("⏸️ Pause")
+            pause_btn.clicked.connect(self.media_player.pause)
+            controls_layout.addWidget(pause_btn)
+            
+            stop_btn = QPushButton("⏹️ Stop")
+            stop_btn.clicked.connect(self.media_player.stop)
+            controls_layout.addWidget(stop_btn)
+            
+            controls_layout.addStretch()
+            layout.addLayout(controls_layout)
+            
+            self.media_player.setMedia(QMediaContent(QUrl.fromLocalFile(temp_path)))
+            self.temp_file_path = temp_path
+            
+        except Exception as e:
+            layout.addWidget(QLabel(f"Error loading video: {str(e)}"))
+        
+        return widget
+    
+    def create_audio_widget(self) -> QWidget:
+        """Create widget for audio preview."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        try:
+            with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as temp_file:
+                temp_file.write(self.blob_data)
+                temp_path = temp_file.name
+            
+            info_label = QLabel(f"🎵 Audio File ({len(self.blob_data)} bytes)")
+            info_label.setStyleSheet("font-size: 14px; padding: 20px; text-align: center;")
+            info_label.setAlignment(Qt.AlignCenter)
+            layout.addWidget(info_label)
+            
+            self.media_player = QMediaPlayer()
+            
+            controls_layout = QHBoxLayout()
+            controls_layout.addStretch()
+            
+            play_btn = QPushButton("▶️ Play")
+            play_btn.clicked.connect(self.media_player.play)
+            play_btn.setMinimumSize(80, 40)
+            controls_layout.addWidget(play_btn)
+            
+            pause_btn = QPushButton("⏸️ Pause")
+            pause_btn.clicked.connect(self.media_player.pause)
+            pause_btn.setMinimumSize(80, 40)
+            controls_layout.addWidget(pause_btn)
+            
+            stop_btn = QPushButton("⏹️ Stop")
+            stop_btn.clicked.connect(self.media_player.stop)
+            stop_btn.setMinimumSize(80, 40)
+            controls_layout.addWidget(stop_btn)
+            
+            controls_layout.addStretch()
+            layout.addLayout(controls_layout)
+            
+            layout.addStretch()
+            
+            self.media_player.setMedia(QMediaContent(QUrl.fromLocalFile(temp_path)))
+            self.temp_file_path = temp_path
+            
+        except Exception as e:
+            layout.addWidget(QLabel(f"Error loading audio: {str(e)}"))
+        
+        return widget
+    
+    def markdown_to_html(self, markdown_text: str) -> str:
+        """Convert markdown to HTML."""
+        html = markdown_text
+        
+        import re
+        html = re.sub(r'### (.*)', r'<h3>\1</h3>', html)
+        html = re.sub(r'## (.*)', r'<h2>\1</h2>', html)
+        html = re.sub(r'# (.*)', r'<h1>\1</h1>', html)
+        html = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', html)
+        html = re.sub(r'\*(.*?)\*', r'<em>\1</em>', html)
+        html = re.sub(r'\[([^\]]+)\]\(([^\)]+)\)', r'<a href="\2">\1</a>', html)
+        html = html.replace('\n', '<br>\n')
+        
+        return f"<html><body style='font-family: Arial; padding: 20px;'>{html}</body></html>"
     
     def create_pdf_widget(self) -> QWidget:
         """Create widget for PDF preview."""
@@ -790,7 +982,7 @@ class BlobFieldWidget(QWidget):
             self,
             f"Select file for {self.column_name}",
             "",
-            "All Files (*);;Images (*.jpg *.jpeg *.png *.bmp *.gif *.tiff *.webp);;Documents (*.pdf *.txt *.doc *.docx);;Videos (*.mp4 *.avi *.mov *.mkv)"
+            "All Files (*);;Images (*.jpg *.jpeg *.png *.bmp *.gif *.tiff *.webp);;Documents (*.pdf *.txt *.md *.doc *.docx);;Videos (*.mp4 *.avi *.mov *.mkv);;Audio (*.mp3 *.wav *.m4a)"
         )
         
         if file_path:
@@ -937,6 +1129,22 @@ class TableWidget(QTableWidget):
     
     def on_item_changed(self, item):
         """Handle cell editing."""
+        # Get column name to check if it's a BLOB column
+        column_name = self.horizontalHeaderItem(item.column()).text()
+        
+        # Don't allow text editing of BLOB columns
+        if self.column_types.get(column_name, '').upper() == 'BLOB':
+            print(f"DEBUG: Preventing text edit of BLOB column {column_name}")
+            sys.stdout.flush()
+            # Revert the text change
+            if hasattr(item, 'original_value') and isinstance(item.original_value, bytes):
+                if len(item.original_value) > 100:
+                    item.setText(repr(item.original_value[:100]) + "...")
+                else:
+                    item.setText(repr(item.original_value))
+            return
+        
+        # Handle normal text cell editing
         if hasattr(item, 'original_value') and item.text() != str(item.original_value):
             self.cell_changed_signal.emit(item.row(), item.column(), item.text())
             item.original_value = item.text()
@@ -955,7 +1163,17 @@ class TableWidget(QTableWidget):
             
             blob_data = item.original_value
             
-            if isinstance(blob_data, bytes) and blob_data:
+            # Ensure blob_data is proper bytes
+            if blob_data is not None and not isinstance(blob_data, bytes):
+                if isinstance(blob_data, (bytearray, memoryview)):
+                    blob_data = bytes(blob_data)
+                elif isinstance(blob_data, str):
+                    blob_data = blob_data.encode('utf-8')
+                else:
+                    blob_data = bytes(blob_data)
+                item.original_value = blob_data
+            
+            if blob_data:
                 view_action = menu.addAction("👁️ View")
                 view_action.triggered.connect(lambda: self.preview_blob(blob_data, column_name))
                 menu.addSeparator()
@@ -982,7 +1200,7 @@ class TableWidget(QTableWidget):
             self,
             f"Select file for {column_name}",
             "",
-            "All Files (*);;Images (*.jpg *.jpeg *.png *.bmp *.gif *.tiff *.webp);;Documents (*.pdf *.txt *.doc *.docx);;Videos (*.mp4 *.avi *.mov *.mkv)"
+            "All Files (*);;Images (*.jpg *.jpeg *.png *.bmp *.gif *.tiff *.webp);;Documents (*.pdf *.txt *.md *.doc *.docx);;Videos (*.mp4 *.avi *.mov *.mkv);;Audio (*.mp3 *.wav *.m4a)"
         )
         
         if file_path:
@@ -1030,17 +1248,39 @@ class TableWidget(QTableWidget):
             for col_idx, cell_data in enumerate(row_data):
                 column_name = columns[col_idx]
                 
-                # Handle BLOB data display
+                # Handle BLOB data display with debugging
                 if self.column_types.get(column_name, '').upper() == 'BLOB' and cell_data is not None:
-                    if isinstance(cell_data, bytes):
-                        display_text = f"<BLOB: {len(cell_data)} bytes> [Right-click to view]"
+                    print(f"DEBUG: BLOB column {column_name}, data type: {type(cell_data)}, length: {len(cell_data) if hasattr(cell_data, '__len__') else 'N/A'}")
+                    print(f"DEBUG: First 50 bytes: {repr(cell_data[:50]) if hasattr(cell_data, '__getitem__') else repr(cell_data)}")
+                    sys.stdout.flush()
+                    
+                    # Convert SQLite BLOB data to bytes
+                    if isinstance(cell_data, (bytes, bytearray, memoryview)):
+                        blob_data = bytes(cell_data)
+                    elif hasattr(cell_data, 'read'):  # File-like object
+                        blob_data = cell_data.read()
                     else:
-                        display_text = str(cell_data)
+                        # Last resort - convert to string then bytes
+                        blob_data = str(cell_data).encode('utf-8')
+                    
+                    print(f"DEBUG: Processed blob_data type: {type(blob_data)}, length: {len(blob_data)}")
+                    sys.stdout.flush()
+                    
+                    # Show raw data instead of formatted display
+                    if len(blob_data) > 100:
+                        display_text = repr(blob_data[:100]) + "..."
+                    else:
+                        display_text = repr(blob_data)
+                    
+                    item = QTableWidgetItem(display_text)
+                    item.original_value = blob_data
+                    # Make BLOB cells non-editable
+                    item.setFlags(item.flags() & ~Qt.ItemIsEditable)
                 else:
                     display_text = str(cell_data) if cell_data is not None else ""
+                    item = QTableWidgetItem(display_text)
+                    item.original_value = cell_data
                 
-                item = QTableWidgetItem(display_text)
-                item.original_value = cell_data
                 self.setItem(row_idx, col_idx, item)
         
         # Resize columns to content but ensure minimum width for editing
@@ -1771,6 +2011,9 @@ class SQLiteExplorer(QMainWindow):
 
 def main():
     """Main application entry point."""
+    print("DEBUG: Starting SQLite Database Explorer with BLOB debugging enabled")
+    sys.stdout.flush()
+    
     app = QApplication(sys.argv)
     app.setApplicationName("SQLite Database Explorer")
     app.setApplicationVersion("1.0")
