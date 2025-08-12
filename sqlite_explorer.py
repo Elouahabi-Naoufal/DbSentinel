@@ -53,7 +53,7 @@ from PyQt5.QtWidgets import (
     QHeaderView, QFileDialog, QMessageBox, QInputDialog, QDialog,
     QDialogButtonBox, QFormLayout, QLineEdit, QLabel, QPushButton,
     QAbstractItemView, QCheckBox, QFrame, QComboBox, QScrollArea,
-    QGroupBox, QGridLayout, QTextEdit
+    QGroupBox, QGridLayout, QTextEdit, QSlider
 )
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QUrl
 from PyQt5.QtGui import QFont, QIcon, QPalette, QColor, QPixmap
@@ -603,6 +603,8 @@ class BlobPreviewDialog(QDialog):
         super().__init__(parent)
         self.blob_data = blob_data
         self.column_name = column_name
+        self.seeking = False
+        self.temp_files = []
         self.setup_ui()
     
     def setup_ui(self):
@@ -793,26 +795,60 @@ class BlobPreviewDialog(QDialog):
             
             layout.addWidget(self.video_widget)
             
+            # Playback controls
             controls_layout = QHBoxLayout()
             
-            play_btn = QPushButton("▶️ Play")
+            play_btn = QPushButton("▶️")
+            play_btn.setMaximumWidth(40)
             play_btn.clicked.connect(lambda: self.safe_media_action("play"))
             controls_layout.addWidget(play_btn)
             
-            pause_btn = QPushButton("⏸️ Pause")
+            pause_btn = QPushButton("⏸️")
+            pause_btn.setMaximumWidth(40)
             pause_btn.clicked.connect(lambda: self.safe_media_action("pause"))
             controls_layout.addWidget(pause_btn)
             
-            stop_btn = QPushButton("⏹️ Stop")
+            stop_btn = QPushButton("⏹️")
+            stop_btn.setMaximumWidth(40)
             stop_btn.clicked.connect(lambda: self.safe_media_action("stop"))
             controls_layout.addWidget(stop_btn)
             
-            controls_layout.addStretch()
+            # Seek slider
+            from PyQt5.QtWidgets import QSlider
+            self.seek_slider = QSlider(Qt.Horizontal)
+            self.seek_slider.setMinimum(0)
+            self.seek_slider.setMaximum(100)
+            self.seek_slider.sliderPressed.connect(self.on_seek_start)
+            self.seek_slider.sliderReleased.connect(self.on_seek_end)
+            controls_layout.addWidget(self.seek_slider)
+            
+            # Time labels
+            self.time_label = QLabel("00:00 / 00:00")
+            self.time_label.setMinimumWidth(80)
+            controls_layout.addWidget(self.time_label)
+            
             layout.addLayout(controls_layout)
+            
+            # Speed control
+            speed_layout = QHBoxLayout()
+            speed_layout.addWidget(QLabel("Speed:"))
+            
+            self.speed_combo = QComboBox()
+            self.speed_combo.addItems(["0.25x", "0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "2.0x"])
+            self.speed_combo.setCurrentText("1.0x")
+            self.speed_combo.currentTextChanged.connect(self.on_speed_changed)
+            speed_layout.addWidget(self.speed_combo)
+            
+            speed_layout.addStretch()
+            layout.addLayout(speed_layout)
+            
+            # Connect media player signals
+            self.media_player.positionChanged.connect(self.on_position_changed)
+            self.media_player.durationChanged.connect(self.on_duration_changed)
             
             logger.debug("Loading video media")
             self.media_player.setMedia(QMediaContent(QUrl.fromLocalFile(temp_path)))
-            self.temp_file_path = temp_path
+            self.temp_files.append(temp_path)
             logger.debug("Video widget created successfully")
             
         except Exception as e:
@@ -867,7 +903,7 @@ class BlobPreviewDialog(QDialog):
             
             logger.debug("Loading audio media")
             self.media_player.setMedia(QMediaContent(QUrl.fromLocalFile(temp_path)))
-            self.temp_file_path = temp_path
+            self.temp_files.append(temp_path)
             logger.debug("Audio widget created successfully")
             
         except Exception as e:
@@ -907,8 +943,8 @@ class BlobPreviewDialog(QDialog):
             web_view.load(QUrl.fromLocalFile(temp_path))
             layout.addWidget(web_view)
             
-            # Clean up temp file when dialog closes
-            self.temp_file_path = temp_path
+            # Store temp file for cleanup
+            self.temp_files.append(temp_path)
         except Exception as e:
             layout.addWidget(QLabel(f"Error loading PDF: {str(e)}"))
         
@@ -980,6 +1016,54 @@ class BlobPreviewDialog(QDialog):
         except Exception as e:
             logger.error(f"Error performing media action {action}: {e}")
     
+    def on_position_changed(self, position):
+        """Update seek slider and time label when video position changes."""
+        if not self.seeking and hasattr(self, 'media_player'):
+            duration = self.media_player.duration()
+            if duration > 0:
+                self.seek_slider.setValue(int((position / duration) * 100))
+            
+            # Update time label
+            current_time = self.format_time(position)
+            total_time = self.format_time(duration)
+            self.time_label.setText(f"{current_time} / {total_time}")
+    
+    def on_duration_changed(self, duration):
+        """Update controls when video duration is available."""
+        if hasattr(self, 'time_label'):
+            total_time = self.format_time(duration)
+            self.time_label.setText(f"00:00 / {total_time}")
+    
+    def on_seek_start(self):
+        """Handle seek slider press."""
+        self.seeking = True
+    
+    def on_seek_end(self):
+        """Handle seek slider release."""
+        if hasattr(self, 'media_player') and self.media_player:
+            duration = self.media_player.duration()
+            if duration > 0:
+                position = int((self.seek_slider.value() / 100) * duration)
+                self.media_player.setPosition(position)
+        self.seeking = False
+    
+    def on_speed_changed(self, speed_text):
+        """Handle playback speed change."""
+        try:
+            speed = float(speed_text.replace('x', ''))
+            if hasattr(self, 'media_player') and self.media_player:
+                self.media_player.setPlaybackRate(speed)
+                logger.debug(f"Playback speed changed to {speed}x")
+        except Exception as e:
+            logger.error(f"Error changing playback speed: {e}")
+    
+    def format_time(self, ms):
+        """Format milliseconds to MM:SS format."""
+        seconds = ms // 1000
+        minutes = seconds // 60
+        seconds = seconds % 60
+        return f"{minutes:02d}:{seconds:02d}"
+    
     def closeEvent(self, event):
         """Clean up temporary files and media player."""
         logger.debug("BlobPreviewDialog closeEvent triggered")
@@ -1003,13 +1087,14 @@ class BlobPreviewDialog(QDialog):
                 logger.debug("Video widget cleanup completed")
             
             # Clean up temporary files
-            if hasattr(self, 'temp_file_path'):
-                logger.debug(f"Cleaning up temporary file: {self.temp_file_path}")
+            logger.debug(f"Cleaning up {len(self.temp_files)} temporary files")
+            for temp_file in self.temp_files:
                 try:
-                    os.unlink(self.temp_file_path)
-                    logger.debug("Temporary file deleted")
+                    if os.path.exists(temp_file):
+                        os.unlink(temp_file)
+                        logger.debug(f"Deleted temp file: {temp_file}")
                 except Exception as e:
-                    logger.warning(f"Could not delete temp file: {e}")
+                    logger.warning(f"Could not delete temp file {temp_file}: {e}")
             
             logger.debug("BlobPreviewDialog cleanup completed, accepting close event")
             event.accept()
