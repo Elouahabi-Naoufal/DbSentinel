@@ -1104,9 +1104,22 @@ class BlobPreviewDialog(QDialog):
                 subprocess.run(["xdg-open", pdf_path])
                 
             logger.debug(f"Opened PDF externally: {pdf_path}")
+            
+            # Schedule PDF file for deletion after a short delay
+            QTimer.singleShot(2000, lambda: self.cleanup_temp_pdf(pdf_path))
+            
         except Exception as e:
             logger.error(f"Failed to open PDF externally: {e}")
             QMessageBox.warning(self, "Error", f"Could not open PDF: {str(e)}\n\nPlease use 'Save As...' instead.")
+    
+    def cleanup_temp_pdf(self, pdf_path: str):
+        """Clean up temporary PDF file after external viewer opens it."""
+        try:
+            if os.path.exists(pdf_path):
+                os.unlink(pdf_path)
+                logger.debug(f"Cleaned up temporary PDF: {pdf_path}")
+        except Exception as e:
+            logger.warning(f"Could not clean up temporary PDF {pdf_path}: {e}")
     
     def create_pdf_preview(self, pdf_path: str) -> QWidget:
         """Create PDF preview using PyMuPDF."""
@@ -1542,7 +1555,7 @@ class BlobPreviewDialog(QDialog):
                 self.video_widget = None
                 logger.debug("Video widget cleanup completed")
             
-            # Clean up temporary files
+            # Clean up temporary files (including PDFs)
             logger.debug(f"Cleaning up {len(self.temp_files)} temporary files")
             for temp_file in self.temp_files:
                 try:
@@ -1565,6 +1578,9 @@ class BlobPreviewDialog(QDialog):
         if hasattr(self, 'media_player') and self.media_player:
             self.media_player.stop()
             self.media_player.setPosition(0)
+        
+        # Clean up temp files immediately
+        self.cleanup_temp_files_now()
         super().reject()
     
     def accept(self):
@@ -1573,7 +1589,20 @@ class BlobPreviewDialog(QDialog):
         if hasattr(self, 'media_player') and self.media_player:
             self.media_player.stop()
             self.media_player.setPosition(0)
+        
+        # Clean up temp files immediately
+        self.cleanup_temp_files_now()
         super().accept()
+    
+    def cleanup_temp_files_now(self):
+        """Immediately clean up temporary files."""
+        for temp_file in self.temp_files:
+            try:
+                if os.path.exists(temp_file):
+                    os.unlink(temp_file)
+                    logger.debug(f"Immediately deleted temp file: {temp_file}")
+            except Exception as e:
+                logger.warning(f"Could not immediately delete temp file {temp_file}: {e}")
 
 
 class BlobFieldWidget(QWidget):
@@ -2673,11 +2702,35 @@ class SQLiteExplorer(QMainWindow):
         try:
             self.db_manager.disconnect()
             logger.debug("Database disconnected successfully")
+            
+            # Clean up uploads folder (database copies, not originals)
+            self.cleanup_uploads_folder()
+            
             event.accept()
             logger.debug("Main application close event accepted")
         except Exception as e:
             logger.error(f"Error during main application close: {e}")
             event.accept()
+    
+    def cleanup_uploads_folder(self):
+        """Clean up database files from uploads folder."""
+        try:
+            uploads_dir = os.path.join(os.path.dirname(__file__), 'uploads')
+            if os.path.exists(uploads_dir):
+                logger.debug(f"Cleaning up uploads folder: {uploads_dir}")
+                for filename in os.listdir(uploads_dir):
+                    if filename == '.gitkeep':
+                        continue  # Keep .gitkeep file
+                    file_path = os.path.join(uploads_dir, filename)
+                    try:
+                        if os.path.isfile(file_path):
+                            os.unlink(file_path)
+                            logger.debug(f"Deleted upload file: {file_path}")
+                    except Exception as e:
+                        logger.warning(f"Could not delete upload file {file_path}: {e}")
+                logger.debug("Uploads folder cleanup completed")
+        except Exception as e:
+            logger.error(f"Error cleaning uploads folder: {e}")
     
     def load_recent_files(self) -> list:
         """Load recent files from settings."""
