@@ -2488,25 +2488,26 @@ class SQLiteExplorer(QMainWindow):
     
     def toggle_sidebar(self):
         """Toggle sidebar visibility."""
-        if hasattr(self, 'sidebar_widget'):
-            if self.sidebar_widget.isVisible():
-                self.sidebar_widget.hide()
-                # Change button to show arrow and move to main area
+        if hasattr(self, 'sidebar_container'):
+            if self.sidebar_container.isVisible():
+                self.sidebar_container.hide()
+                # Update button
                 if hasattr(self, 'sidebar_toggle_btn'):
                     self.sidebar_toggle_btn.setText("»")
                     self.sidebar_toggle_btn.setToolTip("Show sidebar")
-                    self.sidebar_toggle_btn.setParent(self.main_widget)
+                    self.sidebar_toggle_btn.setParent(self.main_container)
                     self.sidebar_toggle_btn.move(5, 5)
                     self.sidebar_toggle_btn.show()
+                    self.sidebar_toggle_btn.raise_()
             else:
-                self.sidebar_widget.show()
-                # Change button back to hide arrow and move to sidebar
+                self.sidebar_container.show()
+                # Move button back
                 if hasattr(self, 'sidebar_toggle_btn'):
                     self.sidebar_toggle_btn.setText("«")
                     self.sidebar_toggle_btn.setToolTip("Hide sidebar")
-                    self.sidebar_toggle_btn.setParent(self.sidebar_widget)
-                    # Re-add to header layout
-                    header_layout = self.sidebar_widget.layout().itemAt(0).layout()
+                    self.sidebar_toggle_btn.setParent(self.sidebar_container)
+                    # Re-add to header
+                    header_layout = self.sidebar_container.layout().itemAt(0)
                     header_layout.addWidget(self.sidebar_toggle_btn)
     
     def setup_ui(self):
@@ -2532,62 +2533,83 @@ class SQLiteExplorer(QMainWindow):
         # Menu and toolbar
         self.setup_menu()
         
-        # Status bar with professional styling
+        # Status bar with enhanced styling
         status_bar = self.statusBar()
         status_bar.showMessage("Ready - Open a database to get started")
-        status_bar.setStyleSheet("QStatusBar { border-top: 1px solid #e0e0e0; background: #f8f9fa; color: #495057; }")
+        status_bar.setMinimumHeight(28)
         
         # Setup responsive behavior
         self.setup_responsive_behavior()
     
     def setup_responsive_layout(self):
-        """Setup single responsive layout."""
-        layout = QHBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        """Setup clean responsive layout."""
+        # Main container
+        main_container = QWidget()
+        container_layout = QHBoxLayout(main_container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(0)
         
+        # Create splitter
         self.splitter = QSplitter(Qt.Horizontal)
         self.splitter.setHandleWidth(1)
-        layout.addWidget(self.splitter)
+        self.splitter.setChildrenCollapsible(False)
         
-        # Left sidebar for tables
-        self.setup_sidebar(self.splitter)
+        # Setup sidebar and main area
+        self.setup_sidebar_container()
+        self.setup_main_container()
         
-        # Right main area for table data
-        self.setup_main_area(self.splitter)
+        # Add to splitter
+        self.splitter.addWidget(self.sidebar_container)
+        self.splitter.addWidget(self.main_container)
         
-        # Set splitter proportions
+        # Set proportions
         self.splitter.setSizes([300, 1100])
         self.splitter.setStretchFactor(0, 0)
         self.splitter.setStretchFactor(1, 1)
         
-        self.main_layout.addLayout(layout)
+        container_layout.addWidget(self.splitter)
+        self.main_layout.addWidget(main_container)
     
-    def setup_sidebar(self, parent):
-        """Setup the responsive sidebar with table list."""
-        self.sidebar_widget = QWidget()
-        self.sidebar_widget.setMinimumWidth(200)
-        self.sidebar_widget.setMaximumWidth(400)
-        sidebar_layout = QVBoxLayout(self.sidebar_widget)
-        sidebar_layout.setContentsMargins(8, 8, 8, 8)
-        sidebar_layout.setSpacing(6)
+    def setup_sidebar_container(self):
+        """Setup clean sidebar container."""
+        self.sidebar_container = QWidget()
+        self.sidebar_container.setMinimumWidth(250)
+        self.sidebar_container.setMaximumWidth(400)
         
-        # Header with icon, title and hide button
+        sidebar_layout = QVBoxLayout(self.sidebar_container)
+        sidebar_layout.setContentsMargins(15, 15, 15, 15)
+        sidebar_layout.setSpacing(8)
+        
+        # Clean header with proper spacing
         header_layout = QHBoxLayout()
-        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setContentsMargins(0, 0, 0, 5)
+        header_layout.setSpacing(8)
         
         title_label = QLabel("📊 Tables")
-        title_label.setFont(QFont("Segoe UI", 11, QFont.Bold))
-        title_label.setStyleSheet("color: #0057FF; padding: 3px 0; font-weight: bold;")
+        title_label.setFont(QFont("Segoe UI", 12, QFont.Bold))
         header_layout.addWidget(title_label)
         
+        # Add some space between title and button
         header_layout.addStretch()
         
         self.sidebar_toggle_btn = QPushButton("«")
-        self.sidebar_toggle_btn.setFixedSize(20, 20)
+        self.sidebar_toggle_btn.setFixedSize(18, 18)
         self.sidebar_toggle_btn.setToolTip("Hide sidebar")
         self.sidebar_toggle_btn.clicked.connect(self.toggle_sidebar)
-        self.sidebar_toggle_btn.setStyleSheet("QPushButton { font-size: 12px; font-weight: bold; }")
+        self.sidebar_toggle_btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: none;
+                font-size: 12px;
+                font-weight: bold;
+                color: #999;
+            }
+            QPushButton:hover {
+                background-color: #f0f0f0;
+                border-radius: 9px;
+                color: #666;
+            }
+        """)
         header_layout.addWidget(self.sidebar_toggle_btn)
         
         sidebar_layout.addLayout(header_layout)
@@ -2595,99 +2617,118 @@ class SQLiteExplorer(QMainWindow):
         # Table list
         self.table_list = QListWidget()
         self.table_list.itemClicked.connect(self.on_table_selected)
-        self.table_list.setMinimumHeight(100)
+        self.table_list.setMinimumHeight(200)
         sidebar_layout.addWidget(self.table_list)
-        
-        parent.addWidget(self.sidebar_widget)
     
-    def setup_main_area(self, parent):
-        """Setup the main area with responsive controls."""
-        self.main_widget = QWidget()
-        main_layout = QVBoxLayout(self.main_widget)
-        main_layout.setContentsMargins(8, 8, 8, 8)
-        main_layout.setSpacing(8)
+    def setup_main_container(self):
+        """Setup clean main content container."""
+        self.main_container = QWidget()
         
+        main_layout = QVBoxLayout(self.main_container)
+        main_layout.setContentsMargins(15, 15, 15, 15)
+        main_layout.setSpacing(15)
+        
+        # Header section with info and controls
+        self.setup_header_section(main_layout)
+        
+        # Content section with table
+        self.setup_content_section(main_layout)
+    
+    def setup_header_section(self, parent_layout):
+        """Setup clean header section."""
         # Table info
         self.table_info_label = QLabel("Select a table to view data")
-        self.table_info_label.setFont(QFont("Segoe UI", 10, QFont.Bold))
-        self.table_info_label.setStyleSheet("color: #FF0033; padding: 3px 0; font-weight: bold;")
+        self.table_info_label.setFont(QFont("Segoe UI", 12, QFont.Bold))
         self.table_info_label.setWordWrap(True)
-        main_layout.addWidget(self.table_info_label)
+        parent_layout.addWidget(self.table_info_label)
         
-        # Responsive button container
-        self.setup_responsive_buttons(main_layout)
-        
+        # Controls
+        self.setup_controls_section(parent_layout)
+    
+    def setup_content_section(self, parent_layout):
+        """Setup clean content section."""
         # Table widget with smooth scrolling
         self.table_widget = TableWidget()
         self.table_widget.cell_changed_signal.connect(self.on_cell_changed)
         self.table_widget.blob_changed_signal.connect(self.on_blob_changed)
         self.table_widget.itemSelectionChanged.connect(self.on_selection_changed)
         
-        # Enable smooth scrolling for the main table
+        # Enable smooth scrolling
         self.table_widget.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.table_widget.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         
-        main_layout.addWidget(self.table_widget)
-        
-        parent.addWidget(self.main_widget)
+        parent_layout.addWidget(self.table_widget)
     
-    def setup_responsive_buttons(self, parent_layout):
-        """Setup responsive button layout."""
-        # Create button container with flow layout
-        button_frame = QFrame()
-        button_frame.setMaximumHeight(70)
+    def setup_controls_section(self, parent_layout):
+        """Setup clean controls section."""
+        # Single row of buttons
+        controls_layout = QHBoxLayout()
+        controls_layout.setSpacing(8)
         
-        # Use grid layout for better control
-        grid_layout = QGridLayout(button_frame)
-        grid_layout.setSpacing(4)
-        grid_layout.setContentsMargins(2, 2, 2, 2)
-        
-        # Create all buttons
+        # Create buttons
         self.create_buttons()
         
-        # Arrange buttons in responsive grid
-        grid_layout.addWidget(self.create_table_btn, 0, 0)
-        grid_layout.addWidget(self.add_column_btn, 0, 1)
-        grid_layout.addWidget(self.add_row_btn, 0, 2)
-        grid_layout.addWidget(self.delete_rows_btn, 1, 0)
-        grid_layout.addWidget(self.refresh_btn, 1, 1)
-        grid_layout.addWidget(self.sql_btn, 1, 2)
+        # Add all buttons in one clean row
+        controls_layout.addWidget(self.create_table_btn)
+        controls_layout.addWidget(self.add_column_btn)
+        controls_layout.addWidget(self.add_row_btn)
+        controls_layout.addWidget(self.delete_rows_btn)
+        controls_layout.addWidget(self.refresh_btn)
+        controls_layout.addWidget(self.sql_btn)
+        controls_layout.addStretch()
         
-        parent_layout.addWidget(button_frame)
+        parent_layout.addLayout(controls_layout)
     
     def create_buttons(self):
         """Create all control buttons with responsive properties."""
-        button_height = 28
+        button_height = 34
         
-        self.create_table_btn = QPushButton("📋 Create")
+        # Clean button styling
+        button_style = """
+            QPushButton {
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-weight: 500;
+                font-size: 13px;
+                min-width: 90px;
+            }
+        """
+        
+        self.create_table_btn = QPushButton("Create Table")
         self.create_table_btn.clicked.connect(self.create_table)
         self.create_table_btn.setEnabled(False)
         self.create_table_btn.setMinimumHeight(button_height)
+        self.create_table_btn.setStyleSheet(button_style)
         
-        self.add_column_btn = QPushButton("➕ Column")
+        self.add_column_btn = QPushButton("Add Column")
         self.add_column_btn.clicked.connect(self.add_column_to_table)
         self.add_column_btn.setEnabled(False)
         self.add_column_btn.setMinimumHeight(button_height)
+        self.add_column_btn.setStyleSheet(button_style)
         
-        self.add_row_btn = QPushButton("➕ Row")
+        self.add_row_btn = QPushButton("Add Row")
         self.add_row_btn.clicked.connect(self.add_row)
         self.add_row_btn.setEnabled(False)
         self.add_row_btn.setMinimumHeight(button_height)
+        self.add_row_btn.setStyleSheet(button_style)
         
-        self.delete_rows_btn = QPushButton("🗑️ Delete")
+        self.delete_rows_btn = QPushButton("Delete")
         self.delete_rows_btn.clicked.connect(self.delete_selected_rows)
         self.delete_rows_btn.setEnabled(False)
         self.delete_rows_btn.setMinimumHeight(button_height)
+        self.delete_rows_btn.setStyleSheet(button_style)
         
-        self.refresh_btn = QPushButton("🔄 Refresh")
+        self.refresh_btn = QPushButton("Refresh")
         self.refresh_btn.clicked.connect(self.refresh_table)
         self.refresh_btn.setEnabled(False)
         self.refresh_btn.setMinimumHeight(button_height)
+        self.refresh_btn.setStyleSheet(button_style)
         
-        self.sql_btn = QPushButton("🗃️ SQL")
+        self.sql_btn = QPushButton("SQL Query")
         self.sql_btn.clicked.connect(self.open_sql_dialog)
         self.sql_btn.setEnabled(False)
         self.sql_btn.setMinimumHeight(button_height)
+        self.sql_btn.setStyleSheet(button_style)
     
     def setup_responsive_behavior(self):
         """Setup responsive behavior based on window size."""
