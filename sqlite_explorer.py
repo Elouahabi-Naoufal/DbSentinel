@@ -1999,8 +1999,14 @@ class SQLiteExplorer(QMainWindow):
         self.db_manager = DatabaseManager()
         self.current_table = None
         self.recent_files = self.load_recent_files()
+        self.current_theme = self.detect_system_theme()
         self.setup_ui()
         self.apply_styling()
+        
+        # Monitor system theme changes
+        self.theme_timer = QTimer()
+        self.theme_timer.timeout.connect(self.check_system_theme)
+        self.theme_timer.start(1000)  # Check every second
     
     def setup_ui(self):
         """Setup the user interface."""
@@ -2057,7 +2063,7 @@ class SQLiteExplorer(QMainWindow):
         
         title_label = QLabel("📊 Database Tables")
         title_label.setFont(QFont("Segoe UI", 14, QFont.Bold))
-        title_label.setStyleSheet("color: #2c3e50; padding: 5px 0;")
+        title_label.setStyleSheet("color: #0057FF; padding: 5px 0; font-weight: bold;")
         header_layout.addWidget(title_label)
         header_layout.addStretch()
         
@@ -2086,7 +2092,7 @@ class SQLiteExplorer(QMainWindow):
         # Table info
         self.table_info_label = QLabel("Select a table to view data")
         self.table_info_label.setFont(QFont("Segoe UI", 12, QFont.Bold))
-        self.table_info_label.setStyleSheet("color: #2c3e50; padding: 5px 0;")
+        self.table_info_label.setStyleSheet("color: #FF0033; padding: 5px 0; font-weight: bold;")
         header_layout.addWidget(self.table_info_label)
         
         header_layout.addStretch()
@@ -2164,214 +2170,200 @@ class SQLiteExplorer(QMainWindow):
         exit_action.setShortcut('Ctrl+Q')
         exit_action.triggered.connect(self.close)
         
+        # View menu
+        view_menu = menubar.addMenu('View')
+        theme_menu = view_menu.addMenu('Theme')
+        
+        light_action = theme_menu.addAction('Light Theme')
+        light_action.triggered.connect(lambda: self.set_theme('light'))
+        
+        dark_action = theme_menu.addAction('Dark Theme')
+        dark_action.triggered.connect(lambda: self.set_theme('dark'))
+        
         # Help menu
         help_menu = menubar.addMenu('Help')
         about_action = help_menu.addAction('About')
         about_action.triggered.connect(self.show_about)
     
     def apply_styling(self):
-        """Apply professional modern theme styling."""
+        """Apply theme styling based on current theme."""
+        # Set button classes BEFORE applying stylesheet
+        if hasattr(self, 'delete_rows_btn'):
+            self.delete_rows_btn.setProperty("class", "danger")
+            self.add_row_btn.setProperty("class", "success")
+            self.add_column_btn.setProperty("class", "success")
+            self.create_table_btn.setProperty("class", "primary")
+        
+        if self.current_theme == 'dark':
+            self.apply_dark_theme()
+        else:
+            self.apply_light_theme()
+        
+        # Force refresh all widgets
+        if hasattr(self, 'delete_rows_btn'):
+            for btn in [self.delete_rows_btn, self.add_row_btn, self.add_column_btn, self.create_table_btn]:
+                btn.style().unpolish(btn)
+                btn.style().polish(btn)
+                btn.update()
+    
+    def apply_light_theme(self):
+        """Apply bold high-contrast light theme."""
         style = """
-        QMainWindow {
-            background-color: #f8f9fa;
-            font-family: 'Segoe UI', 'Arial', sans-serif;
-        }
-        
-        QWidget {
-            background-color: #f8f9fa;
-        }
-        
-        QSplitter::handle {
-            background-color: #dee2e6;
-            width: 1px;
-        }
-        
-        QSplitter::handle:hover {
-            background-color: #007bff;
-        }
-        
-        QListWidget {
-            background-color: white;
-            border: 1px solid #e9ecef;
-            border-radius: 8px;
-            padding: 8px;
-            font-size: 13px;
-            outline: none;
-        }
-        
-        QListWidget::item {
-            padding: 12px 16px;
-            border-radius: 6px;
-            margin: 2px 0;
-            border: none;
-            color: #495057;
-        }
-        
-        QListWidget::item:hover {
-            background-color: #e3f2fd;
-            color: #1976d2;
-        }
-        
-        QListWidget::item:selected {
-            background-color: #1976d2;
-            color: white;
-            font-weight: 500;
-        }
-        
-        QTableWidget {
-            background-color: white;
-            gridline-color: #e9ecef;
-            border: 1px solid #e9ecef;
-            border-radius: 8px;
-            font-size: 13px;
-            selection-background-color: #e3f2fd;
-        }
-        
-        QTableWidget::item {
-            padding: 8px 12px;
-            border: none;
-            min-width: 120px;
-        }
-        
-        QTableWidget QLineEdit {
-            padding: 4px 8px;
-            border: 2px solid #007bff;
-            border-radius: 4px;
-            background-color: white;
-            font-size: 13px;
-            min-width: 200px;
-        }
-        
-        QTableWidget::item:selected {
-            background-color: #e3f2fd;
-            color: #1976d2;
-        }
-        
-        QHeaderView::section {
-            background-color: #2c3e50;
-            color: white;
-            padding: 12px 16px;
-            border: none;
-            border-right: 1px solid #34495e;
-            font-weight: 600;
-            font-size: 13px;
-        }
-        
-        QHeaderView::section:hover {
-            background-color: #34495e;
-        }
-        
-        QPushButton {
-            background-color: #007bff;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 6px;
-            font-weight: 500;
-            font-size: 13px;
-            min-width: 100px;
-        }
-        
-        QPushButton:hover {
-            background-color: #0056b3;
-            transform: translateY(-1px);
-        }
-        
-        QPushButton:pressed {
-            background-color: #004085;
-            transform: translateY(0px);
-        }
-        
-        QPushButton:disabled {
-            background-color: #6c757d;
-            color: #adb5bd;
-        }
-        
-        QPushButton[class="danger"] {
-            background-color: #dc3545;
-        }
-        
-        QPushButton[class="danger"]:hover {
-            background-color: #c82333;
-        }
-        
-        QPushButton[class="success"] {
-            background-color: #28a745;
-        }
-        
-        QPushButton[class="success"]:hover {
-            background-color: #218838;
-        }
-        
-        QPushButton[class="primary"] {
-            background-color: #6f42c1;
-        }
-        
-        QPushButton[class="primary"]:hover {
-            background-color: #5a32a3;
-        }
-        
-        QMenuBar {
-            background-color: white;
-            border-bottom: 1px solid #e9ecef;
-            padding: 4px;
-        }
-        
-        QMenuBar::item {
-            background-color: transparent;
-            padding: 8px 16px;
-            border-radius: 4px;
-        }
-        
-        QMenuBar::item:selected {
-            background-color: #e9ecef;
-        }
-        
-        QMenu {
-            background-color: white;
-            border: 1px solid #e9ecef;
-            border-radius: 6px;
-            padding: 4px;
-        }
-        
-        QMenu::item {
-            padding: 8px 16px;
-            border-radius: 4px;
-        }
-        
-        QMenu::item:selected {
-            background-color: #007bff;
-            color: white;
-        }
-        
-        QDialog {
-            background-color: white;
-        }
-        
-        QLineEdit {
-            padding: 8px 12px;
-            border: 2px solid #e9ecef;
-            border-radius: 6px;
-            font-size: 13px;
-            background-color: white;
-        }
-        
-        QLineEdit:focus {
-            border-color: #007bff;
-            outline: none;
-        }
-        
-        QLabel {
-            color: #495057;
-        }
+        QMainWindow { background-color: #FDFDFD; font-family: 'Segoe UI', 'Arial', sans-serif; color: #000000; font-weight: bold; }
+        QWidget { background-color: #FDFDFD; color: #000000; }
+        QSplitter::handle { background-color: #222222; width: 2px; }
+        QSplitter::handle:hover { background-color: #FF0033; }
+        QListWidget { background-color: #FFFFFF; border: 2px solid #222222; border-radius: 8px; padding: 8px; font-size: 13px; outline: none; color: #000000; font-weight: bold; }
+        QListWidget::item { padding: 12px 16px; border-radius: 6px; margin: 2px 0; border: none; color: #000000; }
+        QListWidget::item:hover { background-color: #FFD300; color: #000000; font-weight: bold; }
+        QListWidget::item:selected { background-color: #0057FF; color: #FFFFFF; font-weight: bold; }
+        QTableWidget { background-color: #FFFFFF; gridline-color: #222222; border: 2px solid #222222; border-radius: 8px; font-size: 13px; selection-background-color: #FFD300; color: #000000; font-weight: bold; alternate-background-color: #F8F8F8; }
+        QTableWidget::item { padding: 8px 12px; border: none; min-width: 120px; color: #000000; }
+        QTableWidget::item:selected { background-color: #FFD300; color: #000000; font-weight: bold; }
+        QHeaderView::section { background-color: #000000; color: #FFFFFF; padding: 12px 16px; border: none; border-right: 2px solid #222222; font-weight: bold; font-size: 14px; }
+        QPushButton { background-color: #0057FF; color: #FFFFFF; border: 2px solid #222222; padding: 12px 24px; border-radius: 8px; font-weight: bold; font-size: 14px; min-width: 120px; }
+        QPushButton:hover { background-color: #FF0033; color: #FFFFFF; border-color: #000000; }
+        QPushButton:disabled { background-color: #444444; color: #202020; border-color: #222222; }
+        QPushButton[class="danger"] { background-color: #D00000; color: #FFFFFF; border-color: #222222; }
+        QPushButton[class="danger"]:hover { background-color: #FF6A00; color: #FFFFFF; }
+        QPushButton[class="success"] { background-color: #00D12E; color: #FFFFFF; border-color: #222222; }
+        QPushButton[class="success"]:hover { background-color: #00B844; color: #FFFFFF; }
+        QPushButton[class="primary"] { background-color: #0084FF; color: #FFFFFF; border-color: #222222; }
+        QPushButton[class="primary"]:hover { background-color: #0078FF; color: #FFFFFF; }
+        QMenuBar { background-color: #FFFFFF; border-bottom: 2px solid #222222; padding: 6px; color: #000000; font-weight: bold; }
+        QMenuBar::item { background-color: transparent; padding: 10px 18px; border-radius: 6px; color: #000000; }
+        QMenuBar::item:selected { background-color: #FFD300; color: #000000; font-weight: bold; }
+        QMenu { background-color: #FFFFFF; border: 2px solid #222222; border-radius: 8px; padding: 6px; color: #000000; font-weight: bold; }
+        QMenu::item { padding: 10px 18px; border-radius: 6px; color: #000000; }
+        QMenu::item:selected { background-color: #0057FF; color: #FFFFFF; font-weight: bold; }
+        QDialog { background-color: #FDFDFD; color: #000000; font-weight: bold; }
+        QLineEdit { padding: 10px 14px; border: 2px solid #222222; border-radius: 8px; font-size: 14px; background-color: #FFFFFF; color: #000000; font-weight: bold; }
+        QLineEdit:focus { border-color: #0057FF; color: #000000; background-color: #FFD300; }
+        QLabel { color: #000000; font-weight: bold; }
+        QStatusBar { background-color: #FFFFFF; color: #000000; border-top: 2px solid #222222; font-weight: bold; }
         """
         self.setStyleSheet(style)
+    
+    def apply_dark_theme(self):
+        """Apply manly glowing Best Blue power theme."""
+        style = """
+        QMainWindow { background-color: #020B1A; font-family: 'Segoe UI', 'Arial', sans-serif; color: #FFFFFF; font-weight: bold; }
+        QWidget { background-color: #020B1A; color: #FFFFFF; }
+        QSplitter::handle { background-color: #00AFFF; width: 2px; }
+        QSplitter::handle:hover { background-color: #FF0033; box-shadow: 0 0 10px #FF0033; }
+        QListWidget { background-color: #020B1A; border: 2px solid #00F6FF; border-radius: 8px; padding: 8px; font-size: 13px; outline: none; color: #FFFFFF; font-weight: bold; }
+        QListWidget::item { padding: 12px 16px; border-radius: 6px; margin: 2px 0; border: none; color: #FFFFFF; text-shadow: 0 0 5px #00AFFF; }
+        QListWidget::item:hover { background-color: #001122; color: #00F6FF; text-shadow: 0 0 10px #00F6FF; border: 1px solid #00F6FF; }
+        QListWidget::item:selected { background-color: #002244; color: #FFFFFF; font-weight: bold; text-shadow: 0 0 15px #00AFFF; border: 2px solid #00AFFF; }
+        QTableWidget { background-color: #020B1A; gridline-color: #00AFFF; border: 2px solid #00F6FF; border-radius: 8px; font-size: 13px; selection-background-color: #001122; color: #FFFFFF; font-weight: bold; alternate-background-color: #0A1520; }
+        QTableWidget::item { padding: 8px 12px; border: none; min-width: 120px; color: #FFFFFF; text-shadow: 0 0 3px #00AFFF; }
+        QTableWidget::item:selected { background-color: #002244; color: #00F6FF; text-shadow: 0 0 12px #00F6FF; }
+        QHeaderView::section { background-color: #000000; color: #FFFFFF; padding: 12px 16px; border: none; border-right: 2px solid #00AFFF; font-weight: bold; font-size: 14px; text-shadow: 0 0 8px #FF0033; }
+        QPushButton { background-color: #00AFFF; color: #FFFFFF; border: 2px solid #00F6FF; padding: 12px 24px; border-radius: 8px; font-weight: bold; font-size: 14px; min-width: 120px; text-shadow: 0 0 8px #FFFFFF; }
+        QPushButton:hover { background-color: #FF0033; color: #FFFFFF; border-color: #FF7700; text-shadow: 0 0 15px #FFFFFF; transform: scale(1.05); }
+        QPushButton:disabled { background-color: #333333; color: #666666; border-color: #444444; text-shadow: none; }
+        QPushButton[class="danger"] { background-color: #FF0033; color: #FFFFFF; border-color: #FF7700; text-shadow: 0 0 10px #FFFFFF; }
+        QPushButton[class="danger"]:hover { background-color: #FF7700; color: #FFFFFF; border-color: #FF0033; text-shadow: 0 0 20px #FFFFFF; }
+        QPushButton[class="success"] { background-color: #00AFFF; color: #FFFFFF; border-color: #00F6FF; text-shadow: 0 0 10px #FFFFFF; }
+        QPushButton[class="success"]:hover { background-color: #00F6FF; color: #000000; border-color: #00AFFF; text-shadow: 0 0 15px #000000; }
+        QPushButton[class="primary"] { background-color: #FF7700; color: #FFFFFF; border-color: #00F6FF; text-shadow: 0 0 10px #FFFFFF; }
+        QPushButton[class="primary"]:hover { background-color: #00F6FF; color: #000000; border-color: #FF7700; text-shadow: 0 0 15px #000000; }
+        QMenuBar { background-color: #020B1A; border-bottom: 2px solid #00AFFF; padding: 6px; color: #FFFFFF; font-weight: bold; }
+        QMenuBar::item { background-color: transparent; padding: 10px 18px; border-radius: 6px; color: #FFFFFF; text-shadow: 0 0 5px #00AFFF; }
+        QMenuBar::item:selected { background-color: #001122; color: #00F6FF; text-shadow: 0 0 12px #00F6FF; border: 1px solid #00F6FF; }
+        QMenu { background-color: #020B1A; border: 2px solid #00F6FF; border-radius: 8px; padding: 6px; color: #FFFFFF; font-weight: bold; }
+        QMenu::item { padding: 10px 18px; border-radius: 6px; color: #FFFFFF; text-shadow: 0 0 5px #00AFFF; }
+        QMenu::item:selected { background-color: #002244; color: #00F6FF; text-shadow: 0 0 15px #00F6FF; border: 1px solid #00F6FF; }
+        QDialog { background-color: #020B1A; color: #FFFFFF; font-weight: bold; }
+        QLineEdit { padding: 10px 14px; border: 2px solid #00AFFF; border-radius: 8px; font-size: 14px; background-color: #001122; color: #FFFFFF; font-weight: bold; text-shadow: 0 0 5px #00AFFF; }
+        QLineEdit:focus { border-color: #00F6FF; color: #00F6FF; text-shadow: 0 0 12px #00F6FF; background-color: #002244; }
+        QLabel { color: #FFFFFF; font-weight: bold; text-shadow: 0 0 3px #00AFFF; }
+        QStatusBar { background-color: #020B1A; color: #FFFFFF; border-top: 2px solid #00AFFF; font-weight: bold; text-shadow: 0 0 5px #00AFFF; }
+        """
+        self.setStyleSheet(style)
+    
+    def check_system_theme(self):
+        """Check if system theme changed and update app theme."""
+        new_theme = self.detect_system_theme()
+        if new_theme != self.current_theme:
+            self.current_theme = new_theme
+            self.apply_styling()
+    
+    def detect_system_theme(self) -> str:
+        """Detect system dark/light mode."""
+        try:
+            import platform
+            system = platform.system()
+            
+            if system == "Windows":
+                try:
+                    import winreg
+                    key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+                    value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+                    winreg.CloseKey(key)
+                    return 'light' if value else 'dark'
+                except:
+                    pass
+            
+            elif system == "Darwin":  # macOS
+                try:
+                    import subprocess
+                    result = subprocess.run(['defaults', 'read', '-g', 'AppleInterfaceStyle'], 
+                                          capture_output=True, text=True)
+                    return 'dark' if 'Dark' in result.stdout else 'light'
+                except:
+                    pass
+            
+            elif system == "Linux":
+                try:
+                    import subprocess
+                    # Try GNOME
+                    result = subprocess.run(['gsettings', 'get', 'org.gnome.desktop.interface', 'gtk-theme'], 
+                                          capture_output=True, text=True)
+                    if 'dark' in result.stdout.lower():
+                        return 'dark'
+                    # Try KDE
+                    result = subprocess.run(['kreadconfig5', '--group', 'General', '--key', 'ColorScheme'], 
+                                          capture_output=True, text=True)
+                    if 'dark' in result.stdout.lower():
+                        return 'dark'
+                except:
+                    pass
+            
+            # Fallback to Qt palette detection
+            from PyQt5.QtGui import QPalette
+            app = QApplication.instance()
+            if app:
+                palette = app.palette()
+                window_color = palette.color(QPalette.Window)
+                text_color = palette.color(QPalette.WindowText)
+                if window_color.lightness() < text_color.lightness():
+                    return 'dark'
+            
+            return 'light'
+        except:
+            return 'light'
+    
+    def set_theme(self, theme: str):
+        """Set application theme."""
+        self.current_theme = theme
+        self.save_theme_setting(theme)
+        self.apply_styling()
         
-        # Set button classes for different styles
-        self.delete_rows_btn.setProperty("class", "danger")
-        self.add_row_btn.setProperty("class", "success")
-        self.add_column_btn.setProperty("class", "success")
-        self.create_table_btn.setProperty("class", "primary")
+        # Force complete application refresh
+        QApplication.processEvents()
+        self.repaint()
+    
+
+    
+    def save_theme_setting(self, theme: str):
+        """Save theme setting to preferences."""
+        try:
+            from PyQt5.QtCore import QSettings
+            settings = QSettings("DbSentinel", "SQLiteExplorer")
+            settings.setValue("theme", theme)
+        except Exception as e:
+            logger.error(f"Failed to save theme setting: {e}")
     
     def open_database(self):
         """Open a database file."""
@@ -2662,6 +2654,7 @@ class SQLiteExplorer(QMainWindow):
         # Update table info when no table selected
         if not has_table:
             self.table_info_label.setText("Select a table to view data")
+            self.table_info_label.setStyleSheet("color: #FF0033; padding: 5px 0; font-weight: bold;")
     
     def show_about(self):
         """Show about dialog."""
