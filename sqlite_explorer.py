@@ -1678,6 +1678,344 @@ class BlobPreviewDialog(QDialog):
                 logger.warning(f"Could not immediately delete temp file {temp_file}: {e}")
 
 
+class SQLQueryDialog(QDialog):
+    """Dialog for executing raw SQL queries with syntax highlighting."""
+    
+    def __init__(self, db_manager, initial_query: str = "", parent=None):
+        super().__init__(parent)
+        self.db_manager = db_manager
+        self.initial_query = initial_query
+        self.data_changed = False
+        self.structure_changed = False
+        self.setup_ui()
+        self.apply_theme()
+    
+    def setup_ui(self):
+        self.setWindowTitle("SQL Query Editor")
+        self.setModal(True)
+        self.resize(900, 700)
+        
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Header
+        header = QLabel("🗃️ SQL Query Editor")
+        header.setFont(QFont("Segoe UI", 16, QFont.Bold))
+        header.setObjectName("sqlHeader")
+        layout.addWidget(header)
+        
+        # SQL Editor
+        editor_label = QLabel("SQL Query:")
+        editor_label.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        layout.addWidget(editor_label)
+        
+        self.sql_editor = QTextEdit()
+        self.sql_editor.setFont(QFont("Consolas", 11))
+        self.sql_editor.setPlainText(self.initial_query)
+        self.sql_editor.setMinimumHeight(200)
+        self.sql_editor.setObjectName("sqlEditor")
+        layout.addWidget(self.sql_editor)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        
+        self.run_btn = QPushButton("▶️ Run Query")
+        self.run_btn.clicked.connect(self.run_query)
+        self.run_btn.setObjectName("runButton")
+        self.run_btn.setMinimumHeight(40)
+        button_layout.addWidget(self.run_btn)
+        
+        self.clear_btn = QPushButton("🗑️ Clear")
+        self.clear_btn.clicked.connect(lambda: self.sql_editor.clear())
+        self.clear_btn.setMinimumHeight(40)
+        button_layout.addWidget(self.clear_btn)
+        
+        button_layout.addStretch()
+        
+        self.close_btn = QPushButton("❌ Close")
+        self.close_btn.clicked.connect(self.accept)
+        self.close_btn.setMinimumHeight(40)
+        button_layout.addWidget(self.close_btn)
+        
+        layout.addLayout(button_layout)
+        
+        # Results area
+        results_label = QLabel("Query Results:")
+        results_label.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        layout.addWidget(results_label)
+        
+        self.results_table = QTableWidget()
+        self.results_table.setAlternatingRowColors(True)
+        self.results_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.results_table.setSortingEnabled(True)
+        self.results_table.setObjectName("resultsTable")
+        layout.addWidget(self.results_table)
+        
+        # Status
+        self.status_label = QLabel("Ready to execute SQL queries")
+        self.status_label.setObjectName("statusLabel")
+        layout.addWidget(self.status_label)
+    
+    def apply_theme(self):
+        """Apply current theme to dialog."""
+        parent_window = self.parent()
+        while parent_window and not hasattr(parent_window, 'current_theme'):
+            parent_window = parent_window.parent()
+        
+        if parent_window and hasattr(parent_window, 'current_theme') and parent_window.current_theme == 'dark':
+            style = """
+            QDialog { background-color: #020B1A; color: #FFFFFF; font-weight: bold; }
+            QLabel { color: #FFFFFF; font-weight: bold; text-shadow: 0 0 3px #00AFFF; }
+            QLabel#sqlHeader { color: #FFFFFF; font-weight: bold; text-shadow: 0 0 8px #00AFFF; background-color: #001122; padding: 15px; border-radius: 8px; }
+            QLabel#statusLabel { color: #00F6FF; font-weight: bold; text-shadow: 0 0 5px #00AFFF; background-color: #001122; padding: 8px; border-radius: 4px; }
+            QTextEdit#sqlEditor { 
+                background-color: #001122; 
+                color: #FFFFFF; 
+                border: 2px solid #00AFFF; 
+                border-radius: 8px; 
+                font-weight: bold;
+                selection-background-color: #002244;
+            }
+            QPushButton { background-color: #00AFFF; color: #FFFFFF; border: 2px solid #00F6FF; padding: 12px 24px; border-radius: 8px; font-weight: bold; font-size: 14px; text-shadow: 0 0 8px #FFFFFF; }
+            QPushButton:hover { background-color: #FF0033; color: #FFFFFF; border-color: #FF7700; text-shadow: 0 0 15px #FFFFFF; }
+            QPushButton#runButton { background-color: #00D12E; color: #FFFFFF; border-color: #00F6FF; }
+            QPushButton#runButton:hover { background-color: #00F6FF; color: #000000; border-color: #00D12E; text-shadow: 0 0 15px #000000; }
+            QTableWidget#resultsTable { 
+                background-color: #020B1A; 
+                gridline-color: #00AFFF; 
+                border: 2px solid #00F6FF; 
+                border-radius: 8px; 
+                color: #FFFFFF; 
+                font-weight: bold; 
+                alternate-background-color: #0A1520;
+                selection-background-color: #002244;
+            }
+            QTableWidget#resultsTable::item { color: #FFFFFF; text-shadow: 0 0 3px #00AFFF; padding: 8px; }
+            QTableWidget#resultsTable::item:selected { background-color: #002244; color: #00F6FF; text-shadow: 0 0 12px #00F6FF; }
+            QHeaderView::section { background-color: #000000; color: #FFFFFF; padding: 12px; border: none; border-right: 2px solid #00AFFF; font-weight: bold; text-shadow: 0 0 8px #FF0033; }
+            """
+        else:
+            style = """
+            QDialog { background-color: #FDFDFD; color: #000000; font-weight: bold; }
+            QLabel { color: #000000; font-weight: bold; }
+            QLabel#sqlHeader { color: #000000; font-weight: bold; background-color: #f8f9fa; padding: 15px; border-radius: 8px; }
+            QLabel#statusLabel { color: #0057FF; font-weight: bold; background-color: #e8f5e8; padding: 8px; border-radius: 4px; }
+            QTextEdit#sqlEditor { 
+                background-color: #FFFFFF; 
+                color: #000000; 
+                border: 2px solid #222222; 
+                border-radius: 8px; 
+                font-weight: bold;
+                selection-background-color: #FFD300;
+            }
+            QPushButton { background-color: #0057FF; color: #FFFFFF; border: 2px solid #222222; padding: 12px 24px; border-radius: 8px; font-weight: bold; font-size: 14px; }
+            QPushButton:hover { background-color: #FF0033; color: #FFFFFF; border-color: #000000; }
+            QPushButton#runButton { background-color: #00D12E; color: #FFFFFF; border-color: #222222; }
+            QPushButton#runButton:hover { background-color: #00B844; color: #FFFFFF; }
+            QTableWidget#resultsTable { 
+                background-color: #FFFFFF; 
+                gridline-color: #222222; 
+                border: 2px solid #222222; 
+                border-radius: 8px; 
+                color: #000000; 
+                font-weight: bold; 
+                alternate-background-color: #F8F8F8;
+                selection-background-color: #FFD300;
+            }
+            QTableWidget#resultsTable::item { color: #000000; padding: 8px; }
+            QTableWidget#resultsTable::item:selected { background-color: #FFD300; color: #000000; font-weight: bold; }
+            QHeaderView::section { background-color: #000000; color: #FFFFFF; padding: 12px; border: none; border-right: 2px solid #222222; font-weight: bold; }
+            """
+        
+        self.setStyleSheet(style)
+        
+        # Apply SQL syntax highlighting
+        self.apply_sql_highlighting()
+    
+    def apply_sql_highlighting(self):
+        """Apply SQL syntax highlighting to the editor."""
+        try:
+            from PyQt5.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor
+            from PyQt5.QtCore import QRegExp
+            
+            class SQLHighlighter(QSyntaxHighlighter):
+                def __init__(self, parent, is_dark_theme):
+                    super().__init__(parent)
+                    self.is_dark = is_dark_theme
+                    self.setup_highlighting()
+                
+                def setup_highlighting(self):
+                    # SQL Keywords
+                    keyword_format = QTextCharFormat()
+                    if self.is_dark:
+                        keyword_format.setForeground(QColor("#00F6FF"))
+                    else:
+                        keyword_format.setForeground(QColor("#0057FF"))
+                    keyword_format.setFontWeight(QFont.Bold)
+                    
+                    keywords = [
+                        "SELECT", "FROM", "WHERE", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER",
+                        "TABLE", "INDEX", "VIEW", "DATABASE", "SCHEMA", "PRIMARY", "KEY", "FOREIGN",
+                        "REFERENCES", "CONSTRAINT", "UNIQUE", "NOT", "NULL", "DEFAULT", "CHECK",
+                        "AND", "OR", "IN", "LIKE", "BETWEEN", "IS", "EXISTS", "CASE", "WHEN", "THEN",
+                        "ELSE", "END", "AS", "DISTINCT", "ORDER", "BY", "GROUP", "HAVING", "LIMIT",
+                        "OFFSET", "JOIN", "INNER", "LEFT", "RIGHT", "FULL", "OUTER", "ON", "UNION",
+                        "INTERSECT", "EXCEPT", "ALL", "ANY", "SOME", "COUNT", "SUM", "AVG", "MIN", "MAX"
+                    ]
+                    
+                    self.highlighting_rules = []
+                    for keyword in keywords:
+                        pattern = QRegExp(f"\\b{keyword}\\b", Qt.CaseInsensitive)
+                        self.highlighting_rules.append((pattern, keyword_format))
+                    
+                    # String literals
+                    string_format = QTextCharFormat()
+                    if self.is_dark:
+                        string_format.setForeground(QColor("#FFD300"))
+                    else:
+                        string_format.setForeground(QColor("#D00000"))
+                    self.highlighting_rules.append((QRegExp("'[^']*'"), string_format))
+                    self.highlighting_rules.append((QRegExp('"[^"]*"'), string_format))
+                    
+                    # Numbers
+                    number_format = QTextCharFormat()
+                    if self.is_dark:
+                        number_format.setForeground(QColor("#FF7700"))
+                    else:
+                        number_format.setForeground(QColor("#FF6A00"))
+                    self.highlighting_rules.append((QRegExp("\\b\\d+\\b"), number_format))
+                    
+                    # Comments
+                    comment_format = QTextCharFormat()
+                    if self.is_dark:
+                        comment_format.setForeground(QColor("#666666"))
+                    else:
+                        comment_format.setForeground(QColor("#888888"))
+                    comment_format.setFontItalic(True)
+                    self.highlighting_rules.append((QRegExp("--[^\n]*"), comment_format))
+                
+                def highlightBlock(self, text):
+                    for pattern, format in self.highlighting_rules:
+                        expression = QRegExp(pattern)
+                        index = expression.indexIn(text)
+                        while index >= 0:
+                            length = expression.matchedLength()
+                            self.setFormat(index, length, format)
+                            index = expression.indexIn(text, index + length)
+            
+            # Apply highlighter
+            parent_window = self.parent()
+            while parent_window and not hasattr(parent_window, 'current_theme'):
+                parent_window = parent_window.parent()
+            
+            is_dark = (parent_window and hasattr(parent_window, 'current_theme') and 
+                      parent_window.current_theme == 'dark')
+            
+            self.highlighter = SQLHighlighter(self.sql_editor.document(), is_dark)
+            
+        except Exception as e:
+            logger.debug(f"SQL highlighting failed: {e}")
+    
+    def run_query(self):
+        """Execute the SQL query with non-blocking UI."""
+        query = self.sql_editor.toPlainText().strip()
+        if not query:
+            self.status_label.setText("❌ Please enter a SQL query")
+            return
+        
+        # Check if query modifies data/structure
+        query_upper = query.upper().strip()
+        if any(query_upper.startswith(cmd) for cmd in ['INSERT', 'UPDATE', 'DELETE']):
+            self.data_changed = True
+        if any(query_upper.startswith(cmd) for cmd in ['CREATE', 'DROP', 'ALTER']):
+            self.structure_changed = True
+        
+        # Disable run button and show progress
+        self.run_btn.setEnabled(False)
+        self.run_btn.setText("⏳ Running...")
+        self.status_label.setText("⏳ Executing query...")
+        
+        # Use QTimer to execute query on next event loop iteration
+        QTimer.singleShot(10, lambda: self.execute_query(query))
+    
+    def execute_query(self, query):
+        """Execute the actual SQL query."""
+        try:
+            cursor = self.db_manager.connection.cursor()
+            cursor.execute(query)
+            
+            query_upper = query.upper().strip()
+            if query_upper.startswith('SELECT') or query_upper.startswith('PRAGMA'):
+                results = cursor.fetchall()
+                columns = [description[0] for description in cursor.description] if cursor.description else []
+                self.display_results(columns, results)
+                message = f"Query executed successfully. {len(results)} rows returned."
+                if len(results) <= 1000:
+                    self.status_label.setText(f"✅ {message}")
+            else:
+                self.db_manager.connection.commit()
+                affected_rows = cursor.rowcount
+                self.results_table.setRowCount(0)
+                self.results_table.setColumnCount(0)
+                if affected_rows >= 0:
+                    message = f"Query executed successfully. {affected_rows} rows affected."
+                else:
+                    message = "Query executed successfully."
+                self.status_label.setText(f"✅ {message}")
+            
+            cursor.close()
+            
+        except Exception as e:
+            self.status_label.setText(f"❌ Error: {str(e)}")
+            self.results_table.setRowCount(0)
+            self.results_table.setColumnCount(0)
+        
+        finally:
+            # Re-enable run button
+            self.run_btn.setEnabled(True)
+            self.run_btn.setText("▶️ Run Query")
+    
+
+    
+    def display_results(self, columns, rows):
+        """Display query results in the table."""
+        # Limit rows for performance (show first 1000 rows)
+        display_rows = rows[:1000] if len(rows) > 1000 else rows
+        
+        self.results_table.setRowCount(len(display_rows))
+        self.results_table.setColumnCount(len(columns))
+        self.results_table.setHorizontalHeaderLabels(columns)
+        
+        # Disable sorting during population for performance
+        self.results_table.setSortingEnabled(False)
+        
+        for row_idx, row_data in enumerate(display_rows):
+            for col_idx, cell_data in enumerate(row_data):
+                display_text = str(cell_data) if cell_data is not None else ""
+                # Truncate very long text for performance
+                if len(display_text) > 500:
+                    display_text = display_text[:500] + "..."
+                item = QTableWidgetItem(display_text)
+                self.results_table.setItem(row_idx, col_idx, item)
+        
+        # Re-enable sorting after population
+        self.results_table.setSortingEnabled(True)
+        
+        # Show truncation warning if needed
+        if len(rows) > 1000:
+            self.status_label.setText(f"✅ Query executed successfully. Showing first 1000 of {len(rows)} rows.")
+        
+        # Resize columns to content (limit for performance)
+        self.results_table.resizeColumnsToContents()
+        for col in range(min(self.results_table.columnCount(), 20)):  # Limit column resizing
+            current_width = self.results_table.columnWidth(col)
+            if current_width < 100:
+                self.results_table.setColumnWidth(col, 100)
+            elif current_width > 300:  # Limit max width for performance
+                self.results_table.setColumnWidth(col, 300)
+
+
 class BlobFieldWidget(QWidget):
     """Widget for BLOB field input with file browser."""
     
@@ -2233,6 +2571,12 @@ class SQLiteExplorer(QMainWindow):
         self.refresh_btn.setMinimumHeight(35)
         header_layout.addWidget(self.refresh_btn)
         
+        self.sql_btn = QPushButton("🗃️ SQL Query")
+        self.sql_btn.clicked.connect(self.open_sql_dialog)
+        self.sql_btn.setEnabled(False)
+        self.sql_btn.setMinimumHeight(35)
+        header_layout.addWidget(self.sql_btn)
+        
         main_layout.addWidget(header_widget)
         
         # Table widget with container
@@ -2329,6 +2673,9 @@ class SQLiteExplorer(QMainWindow):
             
             self.create_table_btn.setProperty("class", "primary")
             logger.debug("apply_styling: Set create_table_btn class to primary")
+            
+            self.sql_btn.setProperty("class", "info")
+            logger.debug("apply_styling: Set sql_btn class to info")
         else:
             logger.debug("apply_styling: Buttons not yet created, skipping property setting")
         
@@ -2344,13 +2691,13 @@ class SQLiteExplorer(QMainWindow):
         # Force refresh all widgets
         if hasattr(self, 'delete_rows_btn'):
             logger.debug("apply_styling: Starting button refresh")
-            buttons = [self.delete_rows_btn, self.add_row_btn, self.add_column_btn, self.create_table_btn]
+            buttons = [self.delete_rows_btn, self.add_row_btn, self.add_column_btn, self.create_table_btn, self.sql_btn]
             for i, btn in enumerate(buttons):
-                logger.debug(f"apply_styling: Refreshing button {i+1}/4")
+                logger.debug(f"apply_styling: Refreshing button {i+1}/{len(buttons)}")
                 btn.style().unpolish(btn)
                 btn.style().polish(btn)
                 btn.update()
-                logger.debug(f"apply_styling: Button {i+1}/4 refreshed")
+                logger.debug(f"apply_styling: Button {i+1}/{len(buttons)} refreshed")
             logger.debug("apply_styling: All buttons refreshed")
         else:
             logger.debug("apply_styling: Buttons not available for refresh")
@@ -2381,6 +2728,8 @@ class SQLiteExplorer(QMainWindow):
         QPushButton[class="success"]:hover { background-color: #00B844; color: #FFFFFF; }
         QPushButton[class="primary"] { background-color: #0084FF; color: #FFFFFF; border-color: #222222; }
         QPushButton[class="primary"]:hover { background-color: #0078FF; color: #FFFFFF; }
+        QPushButton[class="info"] { background-color: #17a2b8; color: #FFFFFF; border-color: #222222; }
+        QPushButton[class="info"]:hover { background-color: #138496; color: #FFFFFF; }
         QMenuBar { background-color: #FFFFFF; border-bottom: 2px solid #222222; padding: 6px; color: #000000; font-weight: bold; }
         QMenuBar::item { background-color: transparent; padding: 10px 18px; border-radius: 6px; color: #000000; }
         QMenuBar::item:selected { background-color: #FFD300; color: #000000; font-weight: bold; }
@@ -2419,6 +2768,8 @@ class SQLiteExplorer(QMainWindow):
         QPushButton[class="success"]:hover { background-color: #00F6FF; color: #000000; border-color: #00AFFF; text-shadow: 0 0 15px #000000; }
         QPushButton[class="primary"] { background-color: #FF7700; color: #FFFFFF; border-color: #00F6FF; text-shadow: 0 0 10px #FFFFFF; }
         QPushButton[class="primary"]:hover { background-color: #00F6FF; color: #000000; border-color: #FF7700; text-shadow: 0 0 15px #000000; }
+        QPushButton[class="info"] { background-color: #17a2b8; color: #FFFFFF; border-color: #00F6FF; text-shadow: 0 0 10px #FFFFFF; }
+        QPushButton[class="info"]:hover { background-color: #138496; color: #FFFFFF; border-color: #00AFFF; text-shadow: 0 0 15px #FFFFFF; }
         QMenuBar { background-color: #020B1A; border-bottom: 2px solid #00AFFF; padding: 6px; color: #FFFFFF; font-weight: bold; }
         QMenuBar::item { background-color: transparent; padding: 10px 18px; border-radius: 6px; color: #FFFFFF; text-shadow: 0 0 5px #00AFFF; }
         QMenuBar::item:selected { background-color: #001122; color: #00F6FF; text-shadow: 0 0 12px #00F6FF; border: 1px solid #00F6FF; }
@@ -2919,6 +3270,7 @@ class SQLiteExplorer(QMainWindow):
         self.add_row_btn.setEnabled(has_table)
         self.delete_rows_btn.setEnabled(has_table and has_selection)
         self.refresh_btn.setEnabled(has_table)
+        self.sql_btn.setEnabled(has_db)
         
         # Update table info when no table selected
         if not has_table:
@@ -3123,6 +3475,22 @@ class SQLiteExplorer(QMainWindow):
             self.recent_files = []
             self.save_recent_files()
             self.update_recent_menu()
+    
+    def open_sql_dialog(self):
+        """Open SQL dialog."""
+        if not self.db_manager.connection:
+            return
+        
+        dialog = SQLQueryDialog(self.db_manager, "", self)
+        dialog.exec_()
+        
+        # Refresh tables list if structure might have changed
+        if dialog.structure_changed:
+            self.load_tables()
+        
+        # Refresh current table if data might have changed
+        if dialog.data_changed and self.current_table:
+            self.load_table_data(self.current_table)
 
 
 def main():
