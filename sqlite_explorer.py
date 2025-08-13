@@ -55,7 +55,7 @@ from PyQt5.QtWidgets import (
     QAbstractItemView, QCheckBox, QFrame, QComboBox, QScrollArea,
     QGroupBox, QGridLayout, QTextEdit, QSlider
 )
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QUrl
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QUrl, QDateTime
 from PyQt5.QtGui import QFont, QIcon, QPalette, QColor, QPixmap
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
@@ -1969,6 +1969,7 @@ class SQLiteExplorer(QMainWindow):
         super().__init__()
         self.db_manager = DatabaseManager()
         self.current_table = None
+        self.recent_files = self.load_recent_files()
         self.setup_ui()
         self.apply_styling()
     
@@ -2118,6 +2119,10 @@ class SQLiteExplorer(QMainWindow):
         open_action = file_menu.addAction('Open Database...')
         open_action.setShortcut('Ctrl+O')
         open_action.triggered.connect(self.open_database)
+        
+        # Recent files submenu
+        self.recent_menu = file_menu.addMenu('Recent Databases')
+        self.update_recent_menu()
         
         file_menu.addSeparator()
         
@@ -2363,6 +2368,7 @@ class SQLiteExplorer(QMainWindow):
             try:
                 self.db_manager.connect(file_path)
                 self.load_tables()
+                self.add_to_recent_files(file_path)
                 self.statusBar().showMessage(f"Connected to: {os.path.basename(file_path)}")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to open database: {str(e)}")
@@ -2414,6 +2420,7 @@ class SQLiteExplorer(QMainWindow):
                 try:
                     self.db_manager.connect(file_path, password)
                     self.load_tables()
+                    self.add_to_recent_files(file_path, is_encrypted=True)
                     self.statusBar().showMessage(f"Connected to encrypted database: {os.path.basename(file_path)}")
                     break
                 except Exception as e:
@@ -2671,6 +2678,125 @@ class SQLiteExplorer(QMainWindow):
         except Exception as e:
             logger.error(f"Error during main application close: {e}")
             event.accept()
+    
+    def load_recent_files(self) -> list:
+        """Load recent files from settings."""
+        try:
+            from PyQt5.QtCore import QSettings
+            settings = QSettings("DbSentinel", "SQLiteExplorer")
+            recent = settings.value("recent_files", [])
+            return recent if isinstance(recent, list) else []
+        except:
+            return []
+    
+    def save_recent_files(self):
+        """Save recent files to settings."""
+        try:
+            from PyQt5.QtCore import QSettings
+            settings = QSettings("DbSentinel", "SQLiteExplorer")
+            settings.setValue("recent_files", self.recent_files)
+        except Exception as e:
+            logger.error(f"Failed to save recent files: {e}")
+    
+    def add_to_recent_files(self, file_path: str, is_encrypted: bool = False):
+        """Add file to recent files list."""
+        file_info = {
+            'path': file_path,
+            'name': os.path.basename(file_path),
+            'encrypted': is_encrypted,
+            'timestamp': QDateTime.currentDateTime().toString()
+        }
+        
+        # Remove if already exists
+        self.recent_files = [f for f in self.recent_files if f.get('path') != file_path]
+        
+        # Add to beginning
+        self.recent_files.insert(0, file_info)
+        
+        # Keep only last 10
+        self.recent_files = self.recent_files[:10]
+        
+        self.save_recent_files()
+        self.update_recent_menu()
+    
+    def update_recent_menu(self):
+        """Update recent files menu."""
+        self.recent_menu.clear()
+        
+        if not self.recent_files:
+            no_recent = self.recent_menu.addAction("No recent databases")
+            no_recent.setEnabled(False)
+            return
+        
+        for file_info in self.recent_files:
+            file_path = file_info.get('path', '')
+            file_name = file_info.get('name', os.path.basename(file_path))
+            is_encrypted = file_info.get('encrypted', False)
+            
+            # Check if file still exists
+            if not os.path.exists(file_path):
+                continue
+            
+            # Create menu item
+            icon = "🔒" if is_encrypted else "📁"
+            action_text = f"{icon} {file_name}"
+            
+            action = self.recent_menu.addAction(action_text)
+            action.setToolTip(file_path)
+            action.triggered.connect(lambda checked, path=file_path: self.open_recent_file(path))
+        
+        if self.recent_files:
+            self.recent_menu.addSeparator()
+            clear_action = self.recent_menu.addAction("Clear Recent Files")
+            clear_action.triggered.connect(self.clear_recent_files)
+    
+    def open_recent_file(self, file_path: str):
+        """Open a recent database file."""
+        if not os.path.exists(file_path):
+            QMessageBox.warning(self, "File Not Found", f"Database file not found:\n{file_path}")
+            # Remove from recent files
+            self.recent_files = [f for f in self.recent_files if f.get('path') != file_path]
+            self.save_recent_files()
+            self.update_recent_menu()
+            return
+        
+        # Test database connection
+        result = self.db_manager.test_database(file_path)
+        if result is None:
+            QMessageBox.critical(self, "Error", "Failed to test database connection")
+            return
+        success, is_encrypted, error_msg = result
+        
+        if success and not is_encrypted:
+            # Regular SQLite database
+            try:
+                self.db_manager.connect(file_path)
+                self.load_tables()
+                self.add_to_recent_files(file_path)
+                self.statusBar().showMessage(f"Connected to: {os.path.basename(file_path)}")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to open database: {str(e)}")
+        elif is_encrypted:
+            # Encrypted database - prompt for password
+            self.handle_encrypted_database(file_path, error_msg)
+        else:
+            # Error opening database
+            QMessageBox.critical(self, "Error", error_msg)
+    
+    def clear_recent_files(self):
+        """Clear all recent files."""
+        reply = QMessageBox.question(
+            self,
+            "Clear Recent Files",
+            "Are you sure you want to clear all recent database files?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            self.recent_files = []
+            self.save_recent_files()
+            self.update_recent_menu()
 
 
 def main():
