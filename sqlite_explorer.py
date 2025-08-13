@@ -636,6 +636,7 @@ class BlobPreviewDialog(QDialog):
         self.seeking = False
         self.temp_files = []
         self.setup_ui()
+        self.apply_theme()
     
     def setup_ui(self):
         self.setWindowTitle(f"Preview: {self.column_name}")
@@ -648,7 +649,7 @@ class BlobPreviewDialog(QDialog):
         # Fixed header - won't expand
         header = QLabel(f"Content Preview - {self.column_name} ({len(self.blob_data)} bytes)")
         header.setFont(QFont("Segoe UI", 12, QFont.Bold))
-        header.setStyleSheet("color: #2c3e50; padding: 10px; background: #f8f9fa; border-radius: 6px;")
+        header.setObjectName("headerLabel")
         header.setFixedHeight(50)
         layout.addWidget(header)
         
@@ -663,16 +664,83 @@ class BlobPreviewDialog(QDialog):
         button_widget.setFixedHeight(50)
         
         save_btn = QPushButton("Save As...")
+        save_btn.setObjectName("saveButton")
         save_btn.clicked.connect(self.save_blob)
         button_layout.addWidget(save_btn)
         
         button_layout.addStretch()
         
         close_btn = QPushButton("Close")
+        close_btn.setObjectName("closeButton")
         close_btn.clicked.connect(self.accept)
         button_layout.addWidget(close_btn)
         
         layout.addWidget(button_widget)
+    
+    def apply_theme(self):
+        """Apply current theme to dialog."""
+        parent_window = self.parent()
+        while parent_window and not hasattr(parent_window, 'current_theme'):
+            parent_window = parent_window.parent()
+        
+        if parent_window and hasattr(parent_window, 'current_theme') and parent_window.current_theme == 'dark':
+            style = """
+            * { background-color: #020B1A; color: #FFFFFF; font-weight: bold; }
+            QDialog { background-color: #020B1A; color: #FFFFFF; font-weight: bold; }
+            QWidget { background-color: #020B1A; color: #FFFFFF; font-weight: bold; }
+            QFrame { background-color: #020B1A; color: #FFFFFF; }
+            QScrollArea { background-color: #020B1A; border: none; }
+            QScrollArea QWidget { background-color: #020B1A; }
+            QScrollArea > QWidget > QWidget { background-color: #020B1A; }
+            QVBoxLayout { background-color: #020B1A; }
+            QHBoxLayout { background-color: #020B1A; }
+            QLabel { color: #FFFFFF; font-weight: bold; text-shadow: 0 0 3px #00AFFF; background-color: #020B1A; border: none; }
+            QLabel#headerLabel { color: #FFFFFF; font-weight: bold; text-shadow: 0 0 5px #00AFFF; background-color: #001122; padding: 10px; border-radius: 6px; }
+            QLabel#pdfHeader { color: #FFFFFF; font-weight: bold; text-shadow: 0 0 5px #FF0033; background-color: #1a0000; padding: 10px; border-radius: 6px; }
+            QLabel#pdfPreviewHeader { color: #FFFFFF; font-weight: bold; text-shadow: 0 0 5px #00AFFF; background-color: #001122; padding: 8px; border-radius: 4px; }
+            QLabel#docHeader { color: #FFFFFF; font-weight: bold; background-color: #001a33; padding: 10px; border-radius: 6px; }
+            QLabel#rtfHeader { color: #FFFFFF; font-weight: bold; background-color: #1a1a00; padding: 10px; border-radius: 6px; }
+            QPushButton { background-color: #00AFFF; color: #FFFFFF; border: 2px solid #00F6FF; padding: 12px 24px; border-radius: 8px; font-weight: bold; font-size: 14px; text-shadow: 0 0 8px #FFFFFF; min-width: 100px; }
+            QPushButton:hover { background-color: #FF0033; color: #FFFFFF; border-color: #FF7700; text-shadow: 0 0 15px #FFFFFF; }
+            QPushButton#pdfOpenButton { background-color: #0084FF; color: #FFFFFF; border: 2px solid #00F6FF; padding: 8px 16px; }
+            QPushButton#pdfSystemButton { background-color: #FF0033; color: #FFFFFF; border: 2px solid #FF7700; padding: 12px 16px; }
+            QPushButton#saveButton { background-color: #00AFFF; color: #FFFFFF; border: 2px solid #00F6FF; padding: 8px 16px; min-width: 80px; }
+            QPushButton#closeButton { background-color: #FF0033; color: #FFFFFF; border: 2px solid #FF7700; padding: 8px 16px; min-width: 80px; }
+            QTextEdit { background-color: #001122; color: #FFFFFF; border: 2px solid #00AFFF; border-radius: 8px; font-weight: bold; }
+            QWebEngineView { background-color: #020B1A; }
+            QVideoWidget { background-color: #020B1A; }
+            QSlider { background-color: #020B1A; }
+            QSlider::groove:horizontal { background-color: #001122; border: 1px solid #00AFFF; height: 4px; }
+            QSlider::handle:horizontal { background-color: #00AFFF; border: 1px solid #00F6FF; width: 12px; margin: -4px 0; border-radius: 6px; }
+            QComboBox { background-color: #001122; color: #FFFFFF; border: 2px solid #00AFFF; padding: 4px; }
+            QComboBox::drop-down { background-color: #00AFFF; }
+            QComboBox::down-arrow { color: #FFFFFF; }
+            QGroupBox { background-color: #020B1A; color: #FFFFFF; border: 2px solid #00AFFF; border-radius: 6px; }
+            QGroupBox::title { color: #FFFFFF; font-weight: bold; text-shadow: 0 0 5px #00AFFF; }
+            """
+        else:
+            style = """
+            * { background-color: #FDFDFD; color: #000000; font-weight: bold; }
+            QDialog { background-color: #FDFDFD; color: #000000; font-weight: bold; }
+            QLabel { color: #000000; font-weight: bold; background-color: #FDFDFD; }
+            QLabel#headerLabel { color: #000000; font-weight: bold; background-color: #f8f9fa; padding: 10px; border-radius: 6px; }
+            QLabel#pdfHeader { color: #000000; font-weight: bold; background-color: #ffebee; padding: 10px; border-radius: 6px; }
+            QLabel#pdfPreviewHeader { color: #000000; font-weight: bold; background-color: #e8f5e8; padding: 8px; border-radius: 4px; }
+            QPushButton { background-color: #0057FF; color: #FFFFFF; border: 2px solid #222222; padding: 12px 24px; border-radius: 8px; font-weight: bold; font-size: 14px; min-width: 100px; }
+            QPushButton:hover { background-color: #FF0033; color: #FFFFFF; border-color: #000000; }
+            QPushButton#pdfOpenButton { background-color: #0084FF; color: #FFFFFF; border: 2px solid #222222; padding: 8px 16px; }
+            QPushButton#pdfSystemButton { background-color: #FF0033; color: #FFFFFF; border: 2px solid #222222; padding: 12px 16px; }
+            QPushButton#saveButton { background-color: #0057FF; color: #FFFFFF; border: 2px solid #222222; padding: 8px 16px; min-width: 80px; }
+            QPushButton#closeButton { background-color: #FF0033; color: #FFFFFF; border: 2px solid #222222; padding: 8px 16px; min-width: 80px; }
+            QLabel#docHeader { color: #000000; font-weight: bold; background-color: #e3f2fd; padding: 10px; border-radius: 6px; }
+            QLabel#rtfHeader { color: #000000; font-weight: bold; background-color: #fff3cd; padding: 10px; border-radius: 6px; }
+            QTextEdit { background-color: #FFFFFF; color: #000000; border: 2px solid #222222; border-radius: 8px; font-weight: bold; }
+            QScrollArea { background-color: #FDFDFD; }
+            QWidget { background-color: #FDFDFD; color: #000000; }
+            QFrame { background-color: #FDFDFD; color: #000000; }
+            """
+        
+        self.setStyleSheet(style)
     
     def create_content_widget(self) -> QWidget:
         """Create appropriate widget based on blob content type."""
@@ -818,7 +886,7 @@ class BlobPreviewDialog(QDialog):
                 image_label = QLabel()
                 image_label.setPixmap(scaled_pixmap)
                 image_label.setAlignment(Qt.AlignCenter)
-                image_label.setStyleSheet("border: 1px solid #ddd; background: white;")
+                image_label.setStyleSheet("background-color: #020B1A !important; border: 2px solid #00AFFF !important;")
                 
                 # Add scroll area for large images
                 scroll = QScrollArea()
@@ -891,7 +959,7 @@ class BlobPreviewDialog(QDialog):
             # Fixed format info header
             format_info = self.get_video_format_info()
             info_header = QLabel(f"{format_info['icon']} {format_info['name']} | {format_info['description']}")
-            info_header.setStyleSheet("font-size: 12px; padding: 8px; background: #e8f5e8; border-radius: 6px; margin-bottom: 5px;")
+            info_header.setStyleSheet("background-color: #020B1A !important; color: #FFFFFF !important; font-size: 12px; padding: 8px; border: 2px solid #00AFFF; border-radius: 6px; margin-bottom: 5px;")
             info_header.setAlignment(Qt.AlignCenter)
             info_header.setFixedHeight(35)
             layout.addWidget(info_header)
@@ -911,24 +979,25 @@ class BlobPreviewDialog(QDialog):
             # Playback controls
             controls_layout = QHBoxLayout()
             
-            play_btn = QPushButton("▶️")
-            play_btn.setMaximumWidth(40)
+            play_btn = QPushButton("▶️ PLAY")
+            play_btn.setStyleSheet("QPushButton { background-color: #00AFFF; color: #FFFFFF; border: 2px solid #00F6FF; padding: 8px 16px; border-radius: 6px; font-weight: bold; } QPushButton:hover { background-color: #FF0033; }")
             play_btn.clicked.connect(lambda: self.safe_media_action("play"))
             controls_layout.addWidget(play_btn)
             
-            pause_btn = QPushButton("⏸️")
-            pause_btn.setMaximumWidth(40)
+            pause_btn = QPushButton("⏸️ PAUSE")
+            pause_btn.setStyleSheet("QPushButton { background-color: #FF7700; color: #FFFFFF; border: 2px solid #00F6FF; padding: 8px 16px; border-radius: 6px; font-weight: bold; } QPushButton:hover { background-color: #FF0033; }")
             pause_btn.clicked.connect(lambda: self.safe_media_action("pause"))
             controls_layout.addWidget(pause_btn)
             
-            stop_btn = QPushButton("⏹️")
-            stop_btn.setMaximumWidth(40)
+            stop_btn = QPushButton("⏹️ STOP")
+            stop_btn.setStyleSheet("QPushButton { background-color: #FF0033; color: #FFFFFF; border: 2px solid #00F6FF; padding: 8px 16px; border-radius: 6px; font-weight: bold; } QPushButton:hover { background-color: #FF7700; }")
             stop_btn.clicked.connect(lambda: self.safe_media_action("stop"))
             controls_layout.addWidget(stop_btn)
             
             # Seek slider
             from PyQt5.QtWidgets import QSlider
             self.seek_slider = QSlider(Qt.Horizontal)
+            self.seek_slider.setStyleSheet("QSlider { background-color: #020B1A; } QSlider::groove:horizontal { background-color: #001122; border: 1px solid #00AFFF; height: 6px; border-radius: 3px; } QSlider::handle:horizontal { background-color: #00AFFF; border: 2px solid #00F6FF; width: 16px; height: 16px; margin: -6px 0; border-radius: 8px; }")
             self.seek_slider.setMinimum(0)
             self.seek_slider.setMaximum(100)
             self.seek_slider.sliderPressed.connect(self.on_seek_start)
@@ -937,6 +1006,7 @@ class BlobPreviewDialog(QDialog):
             
             # Time labels
             self.time_label = QLabel("00:00 / 00:00")
+            self.time_label.setStyleSheet("QLabel { color: #FFFFFF; font-weight: bold; background-color: #020B1A; padding: 4px; }")
             self.time_label.setMinimumWidth(80)
             controls_layout.addWidget(self.time_label)
             
@@ -944,9 +1014,12 @@ class BlobPreviewDialog(QDialog):
             
             # Speed control
             speed_layout = QHBoxLayout()
-            speed_layout.addWidget(QLabel("Speed:"))
+            speed_label = QLabel("Speed:")
+            speed_label.setStyleSheet("QLabel { color: #FFFFFF; font-weight: bold; background-color: #020B1A; }")
+            speed_layout.addWidget(speed_label)
             
             self.speed_combo = QComboBox()
+            self.speed_combo.setStyleSheet("QComboBox { background-color: #001122; color: #FFFFFF; border: 2px solid #00AFFF; padding: 4px; font-weight: bold; } QComboBox::drop-down { background-color: #00AFFF; } QComboBox::down-arrow { color: #FFFFFF; }")
             self.speed_combo.addItems(["0.25x", "0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "2.0x"])
             self.speed_combo.setCurrentText("1.0x")
             self.speed_combo.currentTextChanged.connect(self.on_speed_changed)
@@ -990,7 +1063,7 @@ class BlobPreviewDialog(QDialog):
             # Fixed format-specific info
             format_info = self.get_audio_format_info()
             info_label = QLabel(f"{format_info['icon']} {format_info['name']}\n{len(self.blob_data)} bytes | {format_info['description']}")
-            info_label.setStyleSheet("font-size: 14px; padding: 20px; text-align: center; background: #f0f8ff; border-radius: 8px; margin: 10px;")
+            info_label.setStyleSheet("background-color: #020B1A !important; color: #FFFFFF !important; font-size: 14px; padding: 20px; text-align: center; border: 2px solid #00AFFF; border-radius: 8px; margin: 10px;")
             info_label.setAlignment(Qt.AlignCenter)
             info_label.setFixedHeight(100)
             layout.addWidget(info_label)
@@ -1065,7 +1138,7 @@ class BlobPreviewDialog(QDialog):
             
             # PDF header info
             header = QLabel(f"📄 PDF Document ({len(self.blob_data)} bytes)")
-            header.setStyleSheet("font-size: 14px; font-weight: bold; padding: 10px; background: #ffebee; border-radius: 6px;")
+            header.setObjectName("pdfHeader")
             layout.addWidget(header)
             
             # Try to render PDF preview if PyMuPDF is available
@@ -1135,7 +1208,7 @@ class BlobPreviewDialog(QDialog):
             
             # Fixed PDF info header
             info_label = QLabel(f"📄 PDF Preview - {len(doc)} page(s)")
-            info_label.setStyleSheet("font-size: 14px; font-weight: bold; padding: 8px; background: #e8f5e8; border-radius: 4px;")
+            info_label.setObjectName("pdfPreviewHeader")
             info_label.setFixedHeight(40)
             preview_layout.addWidget(info_label)
             
@@ -1155,7 +1228,7 @@ class BlobPreviewDialog(QDialog):
             page_label = QLabel()
             page_label.setPixmap(scaled_pixmap)
             page_label.setAlignment(Qt.AlignCenter)
-            page_label.setStyleSheet("border: 1px solid #ddd; background: white; margin: 10px;")
+            page_label.setStyleSheet("background-color: #020B1A !important; border: 2px solid #00AFFF !important; margin: 10px;")
             
             # Expandable scroll area - this grows with dialog
             scroll = QScrollArea()
@@ -1165,7 +1238,7 @@ class BlobPreviewDialog(QDialog):
             
             # Fixed button area
             open_btn = QPushButton("🔍 Open Full PDF")
-            open_btn.setStyleSheet("padding: 8px; background: #007bff; color: white; border-radius: 4px;")
+            open_btn.setObjectName("pdfOpenButton")
             open_btn.setFixedHeight(35)
             open_btn.clicked.connect(lambda: self.open_pdf_externally(pdf_path))
             preview_layout.addWidget(open_btn)
@@ -1197,7 +1270,7 @@ class BlobPreviewDialog(QDialog):
         
         # Open button
         open_btn = QPushButton("🔍 Open PDF in System Viewer")
-        open_btn.setStyleSheet("padding: 12px; font-size: 14px; background: #dc3545; color: white; border-radius: 6px;")
+        open_btn.setObjectName("pdfSystemButton")
         open_btn.clicked.connect(lambda: self.open_pdf_externally(pdf_path))
         info_layout.addWidget(open_btn)
         
@@ -1345,7 +1418,7 @@ class BlobPreviewDialog(QDialog):
         
         # Header
         header = QLabel(f"{doc_type} ({len(self.blob_data)} bytes)")
-        header.setStyleSheet("font-size: 14px; font-weight: bold; padding: 10px; background: #e3f2fd; border-radius: 6px;")
+        header.setObjectName("docHeader")
         layout.addWidget(header)
         
         # Document preview info
@@ -1402,7 +1475,7 @@ class BlobPreviewDialog(QDialog):
             text = text.replace('\\', '').strip()
             
             header = QLabel("📄 Rich Text Format Document")
-            header.setStyleSheet("font-size: 14px; font-weight: bold; padding: 10px; background: #fff3cd; border-radius: 6px;")
+            header.setObjectName("rtfHeader")
             layout.addWidget(header)
             
             text_edit = QTextEdit()
@@ -1995,18 +2068,39 @@ class SQLiteExplorer(QMainWindow):
     """Main application window."""
     
     def __init__(self):
+        logger.debug("SQLiteExplorer.__init__: Starting initialization")
         super().__init__()
+        logger.debug("SQLiteExplorer.__init__: Parent class initialized")
+        
         self.db_manager = DatabaseManager()
+        logger.debug("SQLiteExplorer.__init__: DatabaseManager created")
+        
         self.current_table = None
+        logger.debug("SQLiteExplorer.__init__: current_table set to None")
+        
         self.recent_files = self.load_recent_files()
+        logger.debug(f"SQLiteExplorer.__init__: Loaded {len(self.recent_files)} recent files")
+        
         self.current_theme = self.detect_system_theme()
+        logger.debug(f"SQLiteExplorer.__init__: Detected system theme: {self.current_theme}")
+        
         self.setup_ui()
+        logger.debug("SQLiteExplorer.__init__: UI setup completed")
+        
         self.apply_styling()
+        logger.debug("SQLiteExplorer.__init__: Styling applied")
         
         # Monitor system theme changes
         self.theme_timer = QTimer()
+        logger.debug("SQLiteExplorer.__init__: Theme timer created")
+        
         self.theme_timer.timeout.connect(self.check_system_theme)
+        logger.debug("SQLiteExplorer.__init__: Theme timer connected to check_system_theme")
+        
         self.theme_timer.start(1000)  # Check every second
+        logger.debug("SQLiteExplorer.__init__: Theme timer started with 1000ms interval")
+        
+        logger.debug("SQLiteExplorer.__init__: Initialization completed successfully")
     
     def setup_ui(self):
         """Setup the user interface."""
@@ -2187,24 +2281,49 @@ class SQLiteExplorer(QMainWindow):
     
     def apply_styling(self):
         """Apply theme styling based on current theme."""
+        logger.debug(f"apply_styling: Starting styling application for theme: {self.current_theme}")
+        
         # Set button classes BEFORE applying stylesheet
         if hasattr(self, 'delete_rows_btn'):
+            logger.debug("apply_styling: Setting button properties")
             self.delete_rows_btn.setProperty("class", "danger")
+            logger.debug("apply_styling: Set delete_rows_btn class to danger")
+            
             self.add_row_btn.setProperty("class", "success")
+            logger.debug("apply_styling: Set add_row_btn class to success")
+            
             self.add_column_btn.setProperty("class", "success")
+            logger.debug("apply_styling: Set add_column_btn class to success")
+            
             self.create_table_btn.setProperty("class", "primary")
+            logger.debug("apply_styling: Set create_table_btn class to primary")
+        else:
+            logger.debug("apply_styling: Buttons not yet created, skipping property setting")
         
         if self.current_theme == 'dark':
+            logger.debug("apply_styling: Applying dark theme")
             self.apply_dark_theme()
+            logger.debug("apply_styling: Dark theme applied")
         else:
+            logger.debug("apply_styling: Applying light theme")
             self.apply_light_theme()
+            logger.debug("apply_styling: Light theme applied")
         
         # Force refresh all widgets
         if hasattr(self, 'delete_rows_btn'):
-            for btn in [self.delete_rows_btn, self.add_row_btn, self.add_column_btn, self.create_table_btn]:
+            logger.debug("apply_styling: Starting button refresh")
+            buttons = [self.delete_rows_btn, self.add_row_btn, self.add_column_btn, self.create_table_btn]
+            for i, btn in enumerate(buttons):
+                logger.debug(f"apply_styling: Refreshing button {i+1}/4")
                 btn.style().unpolish(btn)
                 btn.style().polish(btn)
                 btn.update()
+                logger.debug(f"apply_styling: Button {i+1}/4 refreshed")
+            logger.debug("apply_styling: All buttons refreshed")
+        else:
+            logger.debug("apply_styling: Buttons not available for refresh")
+        
+        logger.debug("apply_styling: Styling application completed")
     
     def apply_light_theme(self):
         """Apply bold high-contrast light theme."""
@@ -2284,10 +2403,20 @@ class SQLiteExplorer(QMainWindow):
     
     def check_system_theme(self):
         """Check if system theme changed and update app theme."""
+        logger.debug("check_system_theme: Starting system theme check")
+        
         new_theme = self.detect_system_theme()
+        logger.debug(f"check_system_theme: Detected theme: {new_theme}, current theme: {self.current_theme}")
+        
         if new_theme != self.current_theme:
+            logger.debug(f"check_system_theme: Theme changed from {self.current_theme} to {new_theme}")
             self.current_theme = new_theme
+            logger.debug(f"check_system_theme: Updated current_theme to {self.current_theme}")
+            
             self.apply_styling()
+            logger.debug("check_system_theme: Applied new styling")
+        else:
+            logger.debug("check_system_theme: No theme change detected")
     
     def detect_system_theme(self) -> str:
         """Detect system dark/light mode."""
@@ -2346,13 +2475,25 @@ class SQLiteExplorer(QMainWindow):
     
     def set_theme(self, theme: str):
         """Set application theme."""
+        logger.debug(f"set_theme: Manual theme change requested to: {theme}")
+        
         self.current_theme = theme
+        logger.debug(f"set_theme: Updated current_theme to: {self.current_theme}")
+        
         self.save_theme_setting(theme)
+        logger.debug(f"set_theme: Saved theme setting: {theme}")
+        
         self.apply_styling()
+        logger.debug("set_theme: Applied new styling")
         
         # Force complete application refresh
         QApplication.processEvents()
+        logger.debug("set_theme: Processed application events")
+        
         self.repaint()
+        logger.debug("set_theme: Repainted application")
+        
+        logger.debug(f"set_theme: Theme change to {theme} completed")
     
 
     
@@ -2367,40 +2508,64 @@ class SQLiteExplorer(QMainWindow):
     
     def open_database(self):
         """Open a database file."""
+        logger.debug("open_database: Starting database open dialog")
+        
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Open SQLite Database",
             "",
             "SQLite Files (*.db *.sqlite *.sqlite3);;All Files (*)"
         )
+        logger.debug(f"open_database: File dialog returned: {file_path}")
         
         if not file_path:
+            logger.debug("open_database: No file selected, returning")
             return
         
+        logger.debug(f"open_database: Testing database connection for: {file_path}")
         # Test database connection
         result = self.db_manager.test_database(file_path)
+        logger.debug(f"open_database: Test result: {result}")
+        
         if result is None:
+            logger.error("open_database: Database test returned None")
             QMessageBox.critical(self, "Error", "Failed to test database connection")
             return
+            
         success, is_encrypted, error_msg = result
+        logger.debug(f"open_database: success={success}, is_encrypted={is_encrypted}, error_msg={error_msg}")
         
         if success and not is_encrypted:
+            logger.debug("open_database: Opening regular SQLite database")
             # Regular SQLite database
             try:
                 self.db_manager.connect(file_path)
+                logger.debug("open_database: Database connected successfully")
+                
                 self.load_tables()
+                logger.debug("open_database: Tables loaded")
+                
                 self.add_to_recent_files(file_path)
+                logger.debug("open_database: Added to recent files")
+                
                 self.statusBar().showMessage(f"Connected to: {os.path.basename(file_path)}")
+                logger.debug(f"open_database: Status bar updated for: {os.path.basename(file_path)}")
+                
             except Exception as e:
+                logger.error(f"open_database: Failed to open database: {str(e)}")
                 QMessageBox.critical(self, "Error", f"Failed to open database: {str(e)}")
         
         elif is_encrypted:
+            logger.debug("open_database: Database is encrypted, handling encrypted database")
             # Encrypted database - prompt for password
             self.handle_encrypted_database(file_path, error_msg)
         
         else:
+            logger.error(f"open_database: Database error: {error_msg}")
             # Error opening database
             QMessageBox.critical(self, "Error", error_msg)
+        
+        logger.debug("open_database: Database open process completed")
     
     def handle_encrypted_database(self, file_path: str, initial_error: str = ""):
         """Handle encrypted database with password prompt."""
@@ -2465,33 +2630,71 @@ class SQLiteExplorer(QMainWindow):
     
     def load_tables(self):
         """Load table list from the connected database."""
+        logger.debug("load_tables: Starting table loading")
+        
         try:
             tables = self.db_manager.get_tables()
-            self.table_list.clear()
+            logger.debug(f"load_tables: Retrieved {len(tables)} tables: {tables}")
             
-            for table in tables:
+            self.table_list.clear()
+            logger.debug("load_tables: Cleared table list widget")
+            
+            for i, table in enumerate(tables):
+                logger.debug(f"load_tables: Adding table {i+1}/{len(tables)}: {table}")
                 item = QListWidgetItem(table)
                 self.table_list.addItem(item)
+                logger.debug(f"load_tables: Table {table} added to list")
             
             self.update_button_states()
+            logger.debug("load_tables: Button states updated")
+            
+            logger.debug("load_tables: Table loading completed successfully")
+            
         except Exception as e:
+            logger.error(f"load_tables: Failed to load tables: {str(e)}")
             QMessageBox.critical(self, "Error", f"Failed to load tables: {str(e)}")
     
     def on_table_selected(self, item):
         """Handle table selection."""
+        logger.debug("on_table_selected: Table selection event triggered")
+        
         table_name = item.text()
+        logger.debug(f"on_table_selected: Selected table: {table_name}")
+        
         self.current_table = table_name
+        logger.debug(f"on_table_selected: Updated current_table to: {self.current_table}")
+        
         self.load_table_data(table_name)
+        logger.debug(f"on_table_selected: Loaded data for table: {table_name}")
+        
         self.update_button_states()
+        logger.debug("on_table_selected: Updated button states")
+        
+        logger.debug(f"on_table_selected: Table selection handling completed for: {table_name}")
     
     def load_table_data(self, table_name: str):
         """Load data for the selected table."""
+        logger.debug(f"load_table_data: Starting data load for table: {table_name}")
+        
         try:
             columns, rows, column_types = self.db_manager.get_table_data(table_name)
+            logger.debug(f"load_table_data: Retrieved {len(columns)} columns, {len(rows)} rows")
+            logger.debug(f"load_table_data: Columns: {columns}")
+            logger.debug(f"load_table_data: Column types: {column_types}")
+            
             self.table_widget.load_data(columns, rows, column_types)
+            logger.debug("load_table_data: Data loaded into table widget")
+            
             self.table_info_label.setText(f"📋 {table_name} ({len(rows)} rows, {len(columns)} columns)")
+            logger.debug(f"load_table_data: Updated table info label: {table_name} ({len(rows)} rows, {len(columns)} columns)")
+            
             self.statusBar().showMessage(f"Loaded {len(rows)} rows from table '{table_name}'")
+            logger.debug(f"load_table_data: Updated status bar: Loaded {len(rows)} rows from table '{table_name}'")
+            
+            logger.debug(f"load_table_data: Table data loading completed for: {table_name}")
+            
         except Exception as e:
+            logger.error(f"load_table_data: Failed to load table data for {table_name}: {str(e)}")
             QMessageBox.critical(self, "Error", f"Failed to load table data: {str(e)}")
     
     def on_cell_changed(self, row: int, col: int, new_value: str):
@@ -2691,19 +2894,30 @@ class SQLiteExplorer(QMainWindow):
     
     def closeEvent(self, event):
         """Handle application closing."""
-        logger.debug("Main application closeEvent triggered")
+        logger.debug("closeEvent: Main application closeEvent triggered")
+        
         try:
+            logger.debug("closeEvent: Stopping theme timer")
+            if hasattr(self, 'theme_timer'):
+                self.theme_timer.stop()
+                logger.debug("closeEvent: Theme timer stopped")
+            
+            logger.debug("closeEvent: Disconnecting database")
             self.db_manager.disconnect()
-            logger.debug("Database disconnected successfully")
+            logger.debug("closeEvent: Database disconnected successfully")
             
             # Clean up uploads folder (database copies, not originals)
+            logger.debug("closeEvent: Starting uploads folder cleanup")
             self.cleanup_uploads_folder()
+            logger.debug("closeEvent: Uploads folder cleanup completed")
             
             event.accept()
-            logger.debug("Main application close event accepted")
+            logger.debug("closeEvent: Main application close event accepted")
+            
         except Exception as e:
-            logger.error(f"Error during main application close: {e}")
+            logger.error(f"closeEvent: Error during main application close: {e}")
             event.accept()
+            logger.debug("closeEvent: Close event accepted despite error")
     
     def cleanup_uploads_folder(self):
         """Clean up database files from uploads folder."""
@@ -2847,42 +3061,65 @@ class SQLiteExplorer(QMainWindow):
 
 def main():
     """Main application entry point."""
-    logger.info("Starting SQLite Database Explorer with comprehensive debugging")
+    logger.info("main: Starting SQLite Database Explorer with comprehensive debugging")
     
+    logger.debug("main: Creating QApplication instance")
     app = QApplication(sys.argv)
+    logger.debug("main: QApplication created")
+    
     app.setApplicationName("SQLite Database Explorer")
+    logger.debug("main: Application name set to 'SQLite Database Explorer'")
+    
     app.setApplicationVersion("1.0")
+    logger.debug("main: Application version set to '1.0'")
     
     # Set application icon (if available)
+    logger.debug("main: Attempting to set application icon")
     try:
         app.setWindowIcon(QIcon("database.ico"))
-    except:
+        logger.debug("main: Application icon set successfully")
+    except Exception as e:
+        logger.debug(f"main: Icon file not found or failed to load: {e}")
         pass  # Icon file not found, continue without icon
     
     # Create and show main window
-    logger.debug("Creating main window")
+    logger.debug("main: Creating main window")
     window = SQLiteExplorer()
+    logger.debug("main: Main window created")
+    
     window.show()
-    logger.debug("Main window shown")
+    logger.debug("main: Main window shown")
     
     # Check for SQLCipher availability and show warning if not available
+    logger.debug(f"main: Checking SQLCipher availability: {SQLCIPHER_AVAILABLE}")
     if not SQLCIPHER_AVAILABLE:
-        QTimer.singleShot(1000, lambda: QMessageBox.information(
-            window,
-            "SQLCipher Support",
-            "SQLCipher support is not available.\n\n"
-            "To enable encrypted database support, install pysqlcipher3:\n"
-            "pip install pysqlcipher3\n\n"
-            "For Ubuntu/Debian systems, you may also need:\n"
-            "sudo apt-get install libsqlcipher-dev\n\n"
-            "The application will work with regular SQLite databases."
+        logger.debug("main: SQLCipher not available, scheduling warning dialog")
+        QTimer.singleShot(1000, lambda: (
+            logger.debug("main: Showing SQLCipher warning dialog"),
+            QMessageBox.information(
+                window,
+                "SQLCipher Support",
+                "SQLCipher support is not available.\n\n"
+                "To enable encrypted database support, install pysqlcipher3:\n"
+                "pip install pysqlcipher3\n\n"
+                "For Ubuntu/Debian systems, you may also need:\n"
+                "sudo apt-get install libsqlcipher-dev\n\n"
+                "The application will work with regular SQLite databases."
+            ),
+            logger.debug("main: SQLCipher warning dialog shown")
         ))
+    else:
+        logger.debug("main: SQLCipher is available")
     
-    logger.debug("Starting application event loop")
+    logger.debug("main: Starting application event loop")
     exit_code = app.exec_()
-    logger.info(f"Application exited with code: {exit_code}")
+    logger.info(f"main: Application exited with code: {exit_code}")
+    
+    logger.debug("main: Calling sys.exit")
     sys.exit(exit_code)
 
 
 if __name__ == "__main__":
+    logger.debug("__main__: Script started as main module")
     main()
+    logger.debug("__main__: Main function completed")
