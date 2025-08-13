@@ -2081,8 +2081,16 @@ class SQLiteExplorer(QMainWindow):
         self.recent_files = self.load_recent_files()
         logger.debug(f"SQLiteExplorer.__init__: Loaded {len(self.recent_files)} recent files")
         
-        self.current_theme = self.detect_system_theme()
-        logger.debug(f"SQLiteExplorer.__init__: Detected system theme: {self.current_theme}")
+        # Load theme preference
+        self.theme_preference = self.load_theme_preference()
+        logger.debug(f"SQLiteExplorer.__init__: Loaded theme preference: {self.theme_preference}")
+        
+        # Set current theme based on preference
+        if self.theme_preference == 'system':
+            self.current_theme = self.detect_system_theme()
+        else:
+            self.current_theme = self.theme_preference
+        logger.debug(f"SQLiteExplorer.__init__: Set current theme: {self.current_theme}")
         
         self.setup_ui()
         logger.debug("SQLiteExplorer.__init__: UI setup completed")
@@ -2090,15 +2098,18 @@ class SQLiteExplorer(QMainWindow):
         self.apply_styling()
         logger.debug("SQLiteExplorer.__init__: Styling applied")
         
-        # Monitor system theme changes
+        # Monitor system theme changes (only if using system theme)
         self.theme_timer = QTimer()
         logger.debug("SQLiteExplorer.__init__: Theme timer created")
         
         self.theme_timer.timeout.connect(self.check_system_theme)
         logger.debug("SQLiteExplorer.__init__: Theme timer connected to check_system_theme")
         
-        self.theme_timer.start(1000)  # Check every second
-        logger.debug("SQLiteExplorer.__init__: Theme timer started with 1000ms interval")
+        if self.theme_preference == 'system':
+            self.theme_timer.start(1000)  # Check every second only for system theme
+            logger.debug("SQLiteExplorer.__init__: Theme timer started for system theme monitoring")
+        else:
+            logger.debug("SQLiteExplorer.__init__: Theme timer not started (manual theme selected)")
         
         logger.debug("SQLiteExplorer.__init__: Initialization completed successfully")
     
@@ -2268,11 +2279,32 @@ class SQLiteExplorer(QMainWindow):
         view_menu = menubar.addMenu('View')
         theme_menu = view_menu.addMenu('Theme')
         
+        system_action = theme_menu.addAction('System Theme')
+        system_action.setCheckable(True)
+        system_action.triggered.connect(lambda: self.set_theme_preference('system'))
+        
         light_action = theme_menu.addAction('Light Theme')
-        light_action.triggered.connect(lambda: self.set_theme('light'))
+        light_action.setCheckable(True)
+        light_action.triggered.connect(lambda: self.set_theme_preference('light'))
         
         dark_action = theme_menu.addAction('Dark Theme')
-        dark_action.triggered.connect(lambda: self.set_theme('dark'))
+        dark_action.setCheckable(True)
+        dark_action.triggered.connect(lambda: self.set_theme_preference('dark'))
+        
+        # Create action group for exclusive selection
+        from PyQt5.QtWidgets import QActionGroup
+        self.theme_action_group = QActionGroup(self)
+        self.theme_action_group.addAction(system_action)
+        self.theme_action_group.addAction(light_action)
+        self.theme_action_group.addAction(dark_action)
+        
+        # Set current selection
+        if self.theme_preference == 'system':
+            system_action.setChecked(True)
+        elif self.theme_preference == 'light':
+            light_action.setChecked(True)
+        elif self.theme_preference == 'dark':
+            dark_action.setChecked(True)
         
         # Help menu
         help_menu = menubar.addMenu('Help')
@@ -2402,7 +2434,11 @@ class SQLiteExplorer(QMainWindow):
         self.setStyleSheet(style)
     
     def check_system_theme(self):
-        """Check if system theme changed and update app theme."""
+        """Check if system theme changed and update app theme (only if using system theme)."""
+        # Only check system theme if user has selected system theme preference
+        if self.theme_preference != 'system':
+            return
+            
         logger.debug("check_system_theme: Starting system theme check")
         
         new_theme = self.detect_system_theme()
@@ -2473,38 +2509,68 @@ class SQLiteExplorer(QMainWindow):
         except:
             return 'light'
     
-    def set_theme(self, theme: str):
-        """Set application theme."""
-        logger.debug(f"set_theme: Manual theme change requested to: {theme}")
+    def set_theme_preference(self, preference: str):
+        """Set theme preference (system/light/dark)."""
+        logger.debug(f"set_theme_preference: Theme preference change requested to: {preference}")
         
-        self.current_theme = theme
-        logger.debug(f"set_theme: Updated current_theme to: {self.current_theme}")
+        self.theme_preference = preference
+        logger.debug(f"set_theme_preference: Updated theme_preference to: {self.theme_preference}")
         
-        self.save_theme_setting(theme)
-        logger.debug(f"set_theme: Saved theme setting: {theme}")
+        # Update current theme based on preference
+        if preference == 'system':
+            self.current_theme = self.detect_system_theme()
+            # Start monitoring system theme changes
+            if not self.theme_timer.isActive():
+                self.theme_timer.start(1000)
+                logger.debug("set_theme_preference: Started system theme monitoring")
+        else:
+            self.current_theme = preference
+            # Stop monitoring system theme changes
+            if self.theme_timer.isActive():
+                self.theme_timer.stop()
+                logger.debug("set_theme_preference: Stopped system theme monitoring")
+        
+        logger.debug(f"set_theme_preference: Updated current_theme to: {self.current_theme}")
+        
+        self.save_theme_preference(preference)
+        logger.debug(f"set_theme_preference: Saved theme preference: {preference}")
         
         self.apply_styling()
-        logger.debug("set_theme: Applied new styling")
+        logger.debug("set_theme_preference: Applied new styling")
         
         # Force complete application refresh
         QApplication.processEvents()
-        logger.debug("set_theme: Processed application events")
+        logger.debug("set_theme_preference: Processed application events")
         
         self.repaint()
-        logger.debug("set_theme: Repainted application")
+        logger.debug("set_theme_preference: Repainted application")
         
-        logger.debug(f"set_theme: Theme change to {theme} completed")
+        logger.debug(f"set_theme_preference: Theme preference change to {preference} completed")
     
 
     
-    def save_theme_setting(self, theme: str):
-        """Save theme setting to preferences."""
+    def load_theme_preference(self) -> str:
+        """Load theme preference from settings."""
         try:
             from PyQt5.QtCore import QSettings
             settings = QSettings("DbSentinel", "SQLiteExplorer")
-            settings.setValue("theme", theme)
+            preference = settings.value("theme_preference", "system")
+            # Validate preference
+            if preference not in ['system', 'light', 'dark']:
+                preference = 'system'
+            return preference
         except Exception as e:
-            logger.error(f"Failed to save theme setting: {e}")
+            logger.error(f"Failed to load theme preference: {e}")
+            return 'system'
+    
+    def save_theme_preference(self, preference: str):
+        """Save theme preference to settings."""
+        try:
+            from PyQt5.QtCore import QSettings
+            settings = QSettings("DbSentinel", "SQLiteExplorer")
+            settings.setValue("theme_preference", preference)
+        except Exception as e:
+            logger.error(f"Failed to save theme preference: {e}")
     
     def open_database(self):
         """Open a database file."""
