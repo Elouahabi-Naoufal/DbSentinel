@@ -53,7 +53,7 @@ from PyQt5.QtWidgets import (
     QHeaderView, QFileDialog, QMessageBox, QInputDialog, QDialog,
     QDialogButtonBox, QFormLayout, QLineEdit, QLabel, QPushButton,
     QAbstractItemView, QCheckBox, QFrame, QComboBox, QScrollArea,
-    QGroupBox, QGridLayout, QTextEdit, QSlider
+    QGroupBox, QGridLayout, QTextEdit, QSlider, QActionGroup
 )
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QUrl, QDateTime
 from PyQt5.QtGui import QFont, QIcon, QPalette, QColor, QPixmap
@@ -2452,36 +2452,24 @@ class SQLiteExplorer(QMainWindow):
         logger.debug("SQLiteExplorer.__init__: Initialization completed successfully")
     
     def setup_ui(self):
-        """Setup the user interface."""
+        """Setup the responsive user interface."""
         self.setWindowTitle("SQLite Database Explorer - Professional Edition")
-        self.setMinimumSize(1000, 700)
+        self.setMinimumSize(320, 480)  # Phone minimum size
         self.resize(1400, 900)
         
         # Enable window resizing and make it responsive
         self.setWindowFlags(Qt.Window | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint | Qt.WindowCloseButtonHint)
         
-        # Central widget with splitter
+        # Central widget with responsive layout
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         
-        main_layout = QHBoxLayout(central_widget)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
+        self.main_layout = QVBoxLayout(central_widget)  # Changed to VBox for mobile
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setSpacing(0)
         
-        self.splitter = QSplitter(Qt.Horizontal)
-        self.splitter.setHandleWidth(1)
-        main_layout.addWidget(self.splitter)
-        
-        # Left sidebar for tables
-        self.setup_sidebar(self.splitter)
-        
-        # Right main area for table data
-        self.setup_main_area(self.splitter)
-        
-        # Set splitter proportions (responsive)
-        self.splitter.setSizes([350, 1050])
-        self.splitter.setStretchFactor(0, 0)
-        self.splitter.setStretchFactor(1, 1)
+        # Create responsive container
+        self.setup_responsive_layout()
         
         # Menu and toolbar
         self.setup_menu()
@@ -2490,108 +2478,143 @@ class SQLiteExplorer(QMainWindow):
         status_bar = self.statusBar()
         status_bar.showMessage("Ready - Open a database to get started")
         status_bar.setStyleSheet("QStatusBar { border-top: 1px solid #e0e0e0; background: #f8f9fa; color: #495057; }")
+        
+        # Setup responsive behavior
+        self.setup_responsive_behavior()
+    
+    def setup_responsive_layout(self):
+        """Setup single responsive layout."""
+        layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        self.splitter = QSplitter(Qt.Horizontal)
+        self.splitter.setHandleWidth(1)
+        layout.addWidget(self.splitter)
+        
+        # Left sidebar for tables
+        self.setup_sidebar(self.splitter)
+        
+        # Right main area for table data
+        self.setup_main_area(self.splitter)
+        
+        # Set splitter proportions
+        self.splitter.setSizes([300, 1100])
+        self.splitter.setStretchFactor(0, 0)
+        self.splitter.setStretchFactor(1, 1)
+        
+        self.main_layout.addLayout(layout)
     
     def setup_sidebar(self, parent):
-        """Setup the left sidebar with table list."""
-        sidebar_widget = QWidget()
-        sidebar_widget.setMinimumWidth(280)
-        sidebar_widget.setMaximumWidth(500)
-        sidebar_layout = QVBoxLayout(sidebar_widget)
-        sidebar_layout.setContentsMargins(15, 15, 15, 15)
-        sidebar_layout.setSpacing(10)
+        """Setup the responsive sidebar with table list."""
+        self.sidebar_widget = QWidget()
+        self.sidebar_widget.setMinimumWidth(200)
+        self.sidebar_widget.setMaximumWidth(400)
+        sidebar_layout = QVBoxLayout(self.sidebar_widget)
+        sidebar_layout.setContentsMargins(8, 8, 8, 8)
+        sidebar_layout.setSpacing(6)
         
         # Header with icon and title
-        header_layout = QHBoxLayout()
-        header_layout.setContentsMargins(0, 0, 0, 10)
+        title_label = QLabel("📊 Tables")
+        title_label.setFont(QFont("Segoe UI", 11, QFont.Bold))
+        title_label.setStyleSheet("color: #0057FF; padding: 3px 0; font-weight: bold;")
+        sidebar_layout.addWidget(title_label)
         
-        title_label = QLabel("📊 Database Tables")
-        title_label.setFont(QFont("Segoe UI", 14, QFont.Bold))
-        title_label.setStyleSheet("color: #0057FF; padding: 5px 0; font-weight: bold;")
-        header_layout.addWidget(title_label)
-        header_layout.addStretch()
-        
-        sidebar_layout.addLayout(header_layout)
-        
-        # Table list with search
+        # Table list
         self.table_list = QListWidget()
         self.table_list.itemClicked.connect(self.on_table_selected)
-        self.table_list.setMinimumHeight(200)
+        self.table_list.setMinimumHeight(100)
         sidebar_layout.addWidget(self.table_list)
         
-        parent.addWidget(sidebar_widget)
+        parent.addWidget(self.sidebar_widget)
     
     def setup_main_area(self, parent):
-        """Setup the main area with table data and controls."""
-        main_widget = QWidget()
-        main_layout = QVBoxLayout(main_widget)
-        main_layout.setContentsMargins(15, 15, 15, 15)
-        main_layout.setSpacing(15)
-        
-        # Header with table info and controls
-        header_widget = QWidget()
-        header_layout = QHBoxLayout(header_widget)
-        header_layout.setContentsMargins(0, 0, 0, 0)
+        """Setup the main area with responsive controls."""
+        self.main_widget = QWidget()
+        main_layout = QVBoxLayout(self.main_widget)
+        main_layout.setContentsMargins(8, 8, 8, 8)
+        main_layout.setSpacing(8)
         
         # Table info
         self.table_info_label = QLabel("Select a table to view data")
-        self.table_info_label.setFont(QFont("Segoe UI", 12, QFont.Bold))
-        self.table_info_label.setStyleSheet("color: #FF0033; padding: 5px 0; font-weight: bold;")
-        header_layout.addWidget(self.table_info_label)
+        self.table_info_label.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        self.table_info_label.setStyleSheet("color: #FF0033; padding: 3px 0; font-weight: bold;")
+        self.table_info_label.setWordWrap(True)
+        main_layout.addWidget(self.table_info_label)
         
-        header_layout.addStretch()
+        # Responsive button container
+        self.setup_responsive_buttons(main_layout)
         
-        # Control buttons with icons
-        self.create_table_btn = QPushButton("📋 Create Table")
-        self.create_table_btn.clicked.connect(self.create_table)
-        self.create_table_btn.setEnabled(False)
-        self.create_table_btn.setMinimumHeight(35)
-        header_layout.addWidget(self.create_table_btn)
-        
-        self.add_column_btn = QPushButton("➕ Add Column")
-        self.add_column_btn.clicked.connect(self.add_column_to_table)
-        self.add_column_btn.setEnabled(False)
-        self.add_column_btn.setMinimumHeight(35)
-        header_layout.addWidget(self.add_column_btn)
-        
-        self.add_row_btn = QPushButton("➕ Add Row")
-        self.add_row_btn.clicked.connect(self.add_row)
-        self.add_row_btn.setEnabled(False)
-        self.add_row_btn.setMinimumHeight(35)
-        header_layout.addWidget(self.add_row_btn)
-        
-        self.delete_rows_btn = QPushButton("🗑️ Delete Selected")
-        self.delete_rows_btn.clicked.connect(self.delete_selected_rows)
-        self.delete_rows_btn.setEnabled(False)
-        self.delete_rows_btn.setMinimumHeight(35)
-        header_layout.addWidget(self.delete_rows_btn)
-        
-        self.refresh_btn = QPushButton("🔄 Refresh")
-        self.refresh_btn.clicked.connect(self.refresh_table)
-        self.refresh_btn.setEnabled(False)
-        self.refresh_btn.setMinimumHeight(35)
-        header_layout.addWidget(self.refresh_btn)
-        
-        self.sql_btn = QPushButton("🗃️ SQL Query")
-        self.sql_btn.clicked.connect(self.open_sql_dialog)
-        self.sql_btn.setEnabled(False)
-        self.sql_btn.setMinimumHeight(35)
-        header_layout.addWidget(self.sql_btn)
-        
-        main_layout.addWidget(header_widget)
-        
-        # Table widget with container
-        table_container = QWidget()
-        table_layout = QVBoxLayout(table_container)
-        table_layout.setContentsMargins(0, 0, 0, 0)
-        
+        # Table widget
         self.table_widget = TableWidget()
         self.table_widget.cell_changed_signal.connect(self.on_cell_changed)
         self.table_widget.blob_changed_signal.connect(self.on_blob_changed)
         self.table_widget.itemSelectionChanged.connect(self.on_selection_changed)
-        table_layout.addWidget(self.table_widget)
+        main_layout.addWidget(self.table_widget)
         
-        main_layout.addWidget(table_container)
-        parent.addWidget(main_widget)
+        parent.addWidget(self.main_widget)
+    
+    def setup_responsive_buttons(self, parent_layout):
+        """Setup responsive button layout."""
+        # Create button container with flow layout
+        button_frame = QFrame()
+        button_frame.setMaximumHeight(70)
+        
+        # Use grid layout for better control
+        grid_layout = QGridLayout(button_frame)
+        grid_layout.setSpacing(4)
+        grid_layout.setContentsMargins(2, 2, 2, 2)
+        
+        # Create all buttons
+        self.create_buttons()
+        
+        # Arrange buttons in responsive grid
+        grid_layout.addWidget(self.create_table_btn, 0, 0)
+        grid_layout.addWidget(self.add_column_btn, 0, 1)
+        grid_layout.addWidget(self.add_row_btn, 0, 2)
+        grid_layout.addWidget(self.delete_rows_btn, 1, 0)
+        grid_layout.addWidget(self.refresh_btn, 1, 1)
+        grid_layout.addWidget(self.sql_btn, 1, 2)
+        
+        parent_layout.addWidget(button_frame)
+    
+    def create_buttons(self):
+        """Create all control buttons with responsive properties."""
+        button_height = 28
+        
+        self.create_table_btn = QPushButton("📋 Create")
+        self.create_table_btn.clicked.connect(self.create_table)
+        self.create_table_btn.setEnabled(False)
+        self.create_table_btn.setMinimumHeight(button_height)
+        
+        self.add_column_btn = QPushButton("➕ Column")
+        self.add_column_btn.clicked.connect(self.add_column_to_table)
+        self.add_column_btn.setEnabled(False)
+        self.add_column_btn.setMinimumHeight(button_height)
+        
+        self.add_row_btn = QPushButton("➕ Row")
+        self.add_row_btn.clicked.connect(self.add_row)
+        self.add_row_btn.setEnabled(False)
+        self.add_row_btn.setMinimumHeight(button_height)
+        
+        self.delete_rows_btn = QPushButton("🗑️ Delete")
+        self.delete_rows_btn.clicked.connect(self.delete_selected_rows)
+        self.delete_rows_btn.setEnabled(False)
+        self.delete_rows_btn.setMinimumHeight(button_height)
+        
+        self.refresh_btn = QPushButton("🔄 Refresh")
+        self.refresh_btn.clicked.connect(self.refresh_table)
+        self.refresh_btn.setEnabled(False)
+        self.refresh_btn.setMinimumHeight(button_height)
+        
+        self.sql_btn = QPushButton("🗃️ SQL")
+        self.sql_btn.clicked.connect(self.open_sql_dialog)
+        self.sql_btn.setEnabled(False)
+        self.sql_btn.setMinimumHeight(button_height)
+    
+    def setup_responsive_behavior(self):
+        """Setup responsive behavior based on window size."""
+        pass  # Simplified - no dynamic layout switching
     
     def setup_menu(self):
         """Setup menu bar."""
@@ -2636,7 +2659,6 @@ class SQLiteExplorer(QMainWindow):
         dark_action.triggered.connect(lambda: self.set_theme_preference('dark'))
         
         # Create action group for exclusive selection
-        from PyQt5.QtWidgets import QActionGroup
         self.theme_action_group = QActionGroup(self)
         self.theme_action_group.addAction(system_action)
         self.theme_action_group.addAction(light_action)
@@ -2719,7 +2741,7 @@ class SQLiteExplorer(QMainWindow):
         QTableWidget::item { padding: 8px 12px; border: none; min-width: 120px; color: #000000; }
         QTableWidget::item:selected { background-color: #FFD300; color: #000000; font-weight: bold; }
         QHeaderView::section { background-color: #000000; color: #FFFFFF; padding: 12px 16px; border: none; border-right: 2px solid #222222; font-weight: bold; font-size: 14px; }
-        QPushButton { background-color: #0057FF; color: #FFFFFF; border: 2px solid #222222; padding: 12px 24px; border-radius: 8px; font-weight: bold; font-size: 14px; min-width: 120px; }
+        QPushButton { background-color: #0057FF; color: #FFFFFF; border: 2px solid #222222; padding: 8px 12px; border-radius: 6px; font-weight: bold; font-size: 12px; min-width: 80px; }
         QPushButton:hover { background-color: #FF0033; color: #FFFFFF; border-color: #000000; }
         QPushButton:disabled { background-color: #444444; color: #202020; border-color: #222222; }
         QPushButton[class="danger"] { background-color: #D00000; color: #FFFFFF; border-color: #222222; }
@@ -2759,7 +2781,7 @@ class SQLiteExplorer(QMainWindow):
         QTableWidget::item { padding: 8px 12px; border: none; min-width: 120px; color: #FFFFFF; text-shadow: 0 0 3px #00AFFF; }
         QTableWidget::item:selected { background-color: #002244; color: #00F6FF; text-shadow: 0 0 12px #00F6FF; }
         QHeaderView::section { background-color: #000000; color: #FFFFFF; padding: 12px 16px; border: none; border-right: 2px solid #00AFFF; font-weight: bold; font-size: 14px; text-shadow: 0 0 8px #FF0033; }
-        QPushButton { background-color: #00AFFF; color: #FFFFFF; border: 2px solid #00F6FF; padding: 12px 24px; border-radius: 8px; font-weight: bold; font-size: 14px; min-width: 120px; text-shadow: 0 0 8px #FFFFFF; }
+        QPushButton { background-color: #00AFFF; color: #FFFFFF; border: 2px solid #00F6FF; padding: 8px 12px; border-radius: 6px; font-weight: bold; font-size: 12px; min-width: 80px; text-shadow: 0 0 8px #FFFFFF; }
         QPushButton:hover { background-color: #FF0033; color: #FFFFFF; border-color: #FF7700; text-shadow: 0 0 15px #FFFFFF; transform: scale(1.05); }
         QPushButton:disabled { background-color: #333333; color: #666666; border-color: #444444; text-shadow: none; }
         QPushButton[class="danger"] { background-color: #FF0033; color: #FFFFFF; border-color: #FF7700; text-shadow: 0 0 10px #FFFFFF; }
@@ -3303,12 +3325,17 @@ class SQLiteExplorer(QMainWindow):
         # Adjust splitter sizes based on window width
         if hasattr(self, 'splitter'):
             width = self.width()
-            if width < 1200:
-                # Smaller window - reduce sidebar
-                self.splitter.setSizes([250, width - 250])
+            if width < 800:
+                # Very small window - minimize sidebar
+                sidebar_width = min(200, width // 4)
+                self.splitter.setSizes([sidebar_width, width - sidebar_width])
+            elif width < 1200:
+                # Medium window - reduce sidebar
+                sidebar_width = min(250, width // 3)
+                self.splitter.setSizes([sidebar_width, width - sidebar_width])
             else:
-                # Larger window - standard proportions
-                self.splitter.setSizes([350, width - 350])
+                # Large window - standard proportions
+                self.splitter.setSizes([300, width - 300])
     
     def closeEvent(self, event):
         """Handle application closing."""
