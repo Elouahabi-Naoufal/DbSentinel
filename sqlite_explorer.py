@@ -75,6 +75,29 @@ try:
 except ImportError:
     PYMUPDF_AVAILABLE = False
 
+# Try to import additional libraries for comprehensive file support
+try:
+    import zipfile
+    import tarfile
+    ZIP_AVAILABLE = True
+except ImportError:
+    ZIP_AVAILABLE = False
+
+try:
+    from pygments import highlight
+    from pygments.lexers import get_lexer_by_name, guess_lexer
+    from pygments.formatters import HtmlFormatter
+    PYGMENTS_AVAILABLE = True
+except ImportError:
+    PYGMENTS_AVAILABLE = False
+
+try:
+    import openpyxl
+    import pandas as pd
+    OFFICE_LIBS_AVAILABLE = True
+except ImportError:
+    OFFICE_LIBS_AVAILABLE = False
+
 # Try to import pysqlcipher3 for encrypted database support
 try:
     from pysqlcipher3 import dbapi2 as sqlcipher
@@ -669,6 +692,18 @@ class BlobPreviewDialog(QDialog):
             return self.create_pdf_widget()
         elif content_type == 'document':
             return self.create_document_widget()
+        elif content_type == 'archive':
+            return self.create_archive_widget()
+        elif content_type == 'code':
+            return self.create_code_widget()
+        elif content_type == 'markup':
+            return self.create_markup_widget()
+        elif content_type == 'json':
+            return self.create_json_widget()
+        elif content_type == 'font':
+            return self.create_font_widget()
+        elif content_type == 'executable':
+            return self.create_executable_widget()
         else:
             return self.create_hex_widget()
     
@@ -677,8 +712,20 @@ class BlobPreviewDialog(QDialog):
         if not self.blob_data:
             return 'empty'
         
+        # Check for archive formats first
+        if self.blob_data.startswith(b'PK\x03\x04'):  # ZIP
+            if (b'word/' in self.blob_data[:1000] or b'xl/' in self.blob_data[:1000] or
+                b'ppt/' in self.blob_data[:1000] or b'content.xml' in self.blob_data[:1000]):
+                return 'document'
+            return 'archive'
+        elif (self.blob_data.startswith(b'\x1f\x8b') or  # GZIP
+              self.blob_data.startswith(b'BZh') or  # BZIP2
+              self.blob_data.startswith(b'7z\xbc\xaf\x27\x1c') or  # 7Z
+              self.blob_data.startswith(b'Rar!\x1a\x07\x00')):
+            return 'archive'
+        
         # Check for image formats
-        if self.blob_data.startswith(b'\xff\xd8\xff'):  # JPEG
+        elif self.blob_data.startswith(b'\xff\xd8\xff'):  # JPEG
             return 'image'
         elif self.blob_data.startswith(b'\x89PNG\r\n\x1a\n'):  # PNG
             return 'image'
@@ -687,6 +734,8 @@ class BlobPreviewDialog(QDialog):
         elif self.blob_data.startswith(b'BM'):  # BMP
             return 'image'
         elif self.blob_data.startswith(b'RIFF') and b'WEBP' in self.blob_data[:12]:  # WebP
+            return 'image'
+        elif self.blob_data.startswith(b'<svg') or b'<SVG' in self.blob_data[:100]:  # SVG
             return 'image'
         
         # Check for video formats
@@ -711,25 +760,41 @@ class BlobPreviewDialog(QDialog):
               self.blob_data.startswith(b'MAC ')):  # APE
             return 'audio'
         
+        # Check for font formats
+        elif (self.blob_data.startswith(b'\x00\x01\x00\x00') or  # TTF
+              self.blob_data.startswith(b'OTTO') or  # OTF
+              self.blob_data.startswith(b'wOFF') or  # WOFF
+              self.blob_data.startswith(b'wOF2')):  # WOFF2
+            return 'font'
+        
+        # Check for executable formats
+        elif (self.blob_data.startswith(b'MZ') or  # Windows EXE/DLL
+              self.blob_data.startswith(b'\x7fELF') or  # Linux ELF
+              self.blob_data.startswith(b'\xca\xfe\xba\xbe')):  # Mach-O
+            return 'executable'
+        
         # Check for document formats
         elif self.blob_data.startswith(b'%PDF'):  # PDF
             return 'pdf'
-        elif (self.blob_data.startswith(b'PK\x03\x04') and  # ZIP-based formats
-              (b'word/' in self.blob_data[:1000] or b'xl/' in self.blob_data[:1000] or
-               b'ppt/' in self.blob_data[:1000] or b'content.xml' in self.blob_data[:1000])):
-            return 'document'
         elif (self.blob_data.startswith(b'\xd0\xcf\x11\xe0') or  # DOC, XLS, PPT
               self.blob_data.startswith(b'{\\rtf')):
             return 'document'
         
-        # Check if it's text (UTF-8)
+        # Check if it's text-based content
         try:
             text_content = self.blob_data.decode('utf-8')
-            # Check if it's markdown
-            if ('# ' in text_content or '## ' in text_content or 
-                '**' in text_content or '*' in text_content or
-                '[' in text_content and '](' in text_content):
+            
+            # Check for specific text formats
+            if text_content.strip().startswith(('<?xml', '<html', '<HTML')):
+                return 'markup'
+            elif text_content.strip().startswith(('{', '[')) and ('}' in text_content or ']' in text_content):
+                return 'json'
+            elif ('# ' in text_content or '## ' in text_content or 
+                  '**' in text_content or '*' in text_content or
+                  '[' in text_content and '](' in text_content):
                 return 'markdown'
+            elif any(keyword in text_content[:200] for keyword in ['def ', 'class ', 'import ', 'function', 'var ', 'const ']):
+                return 'code'
             return 'text'
         except UnicodeDecodeError:
             pass
@@ -1493,6 +1558,22 @@ class BlobPreviewDialog(QDialog):
         except Exception as e:
             logger.error(f"Error during BlobPreviewDialog closeEvent: {e}")
             event.accept()  # Accept anyway to prevent hanging
+    
+    def reject(self):
+        """Handle dialog rejection (ESC key, X button)."""
+        # Force stop media before closing
+        if hasattr(self, 'media_player') and self.media_player:
+            self.media_player.stop()
+            self.media_player.setPosition(0)
+        super().reject()
+    
+    def accept(self):
+        """Handle dialog acceptance (OK button)."""
+        # Force stop media before closing
+        if hasattr(self, 'media_player') and self.media_player:
+            self.media_player.stop()
+            self.media_player.setPosition(0)
+        super().accept()
 
 
 class BlobFieldWidget(QWidget):
@@ -1523,7 +1604,7 @@ class BlobFieldWidget(QWidget):
             self,
             f"Select file for {self.column_name}",
             "",
-            "All Files (*);;Images (*.jpg *.jpeg *.png *.bmp *.gif *.tiff *.webp);;Documents (*.pdf *.txt *.md *.doc *.docx *.xlsx *.pptx *.odt *.rtf);;Videos (*.mp4 *.avi *.mov *.mkv *.mpg *.flv *.webm);;Audio (*.mp3 *.wav *.m4a *.flac *.ogg *.wv *.ape)"
+            "All Files (*);;Images (*.jpg *.jpeg *.png *.bmp *.gif *.tiff *.webp *.svg);;Documents (*.pdf *.txt *.md *.doc *.docx *.xlsx *.pptx *.odt *.rtf);;Videos (*.mp4 *.avi *.mov *.mkv *.mpg *.flv *.webm);;Audio (*.mp3 *.wav *.m4a *.flac *.ogg *.wv *.ape);;Code (*.py *.js *.java *.c *.cpp *.html *.css *.php);;Archives (*.zip *.tar *.gz *.7z *.rar);;Fonts (*.ttf *.otf *.woff)"
         )
         
         if file_path:
@@ -1741,7 +1822,7 @@ class TableWidget(QTableWidget):
             self,
             f"Select file for {column_name}",
             "",
-            "All Files (*);;Images (*.jpg *.jpeg *.png *.bmp *.gif *.tiff *.webp);;Documents (*.pdf *.txt *.md *.doc *.docx *.xlsx *.pptx *.odt *.rtf);;Videos (*.mp4 *.avi *.mov *.mkv *.mpg *.flv *.webm);;Audio (*.mp3 *.wav *.m4a *.flac *.ogg *.wv *.ape)"
+            "All Files (*);;Images (*.jpg *.jpeg *.png *.bmp *.gif *.tiff *.webp *.svg);;Documents (*.pdf *.txt *.md *.doc *.docx *.xlsx *.pptx *.odt *.rtf);;Videos (*.mp4 *.avi *.mov *.mkv *.mpg *.flv *.webm);;Audio (*.mp3 *.wav *.m4a *.flac *.ogg *.wv *.ape);;Code (*.py *.js *.java *.c *.cpp *.html *.css *.php);;Archives (*.zip *.tar *.gz *.7z *.rar);;Fonts (*.ttf *.otf *.woff)"
         )
         
         if file_path:
