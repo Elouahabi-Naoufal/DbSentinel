@@ -994,14 +994,17 @@ class BlobPreviewDialog(QDialog):
             stop_btn.clicked.connect(lambda: self.safe_media_action("stop"))
             controls_layout.addWidget(stop_btn)
             
-            # Seek slider
+            # Seek slider with smooth seeking
             from PyQt5.QtWidgets import QSlider
             self.seek_slider = QSlider(Qt.Horizontal)
             self.seek_slider.setStyleSheet("QSlider { background-color: #020B1A; } QSlider::groove:horizontal { background-color: #001122; border: 1px solid #00AFFF; height: 6px; border-radius: 3px; } QSlider::handle:horizontal { background-color: #00AFFF; border: 2px solid #00F6FF; width: 16px; height: 16px; margin: -6px 0; border-radius: 8px; }")
             self.seek_slider.setMinimum(0)
-            self.seek_slider.setMaximum(100)
+            self.seek_slider.setMaximum(10000)  # Higher resolution for smooth seeking
+            self.seek_slider.setPageStep(100)  # Smaller page steps
+            self.seek_slider.setSingleStep(10)  # Smaller single steps
             self.seek_slider.sliderPressed.connect(self.on_seek_start)
             self.seek_slider.sliderReleased.connect(self.on_seek_end)
+            self.seek_slider.sliderMoved.connect(self.on_seek_moved)  # Real-time seeking
             controls_layout.addWidget(self.seek_slider)
             
             # Time labels
@@ -1563,7 +1566,9 @@ class BlobPreviewDialog(QDialog):
         if not self.seeking and hasattr(self, 'media_player'):
             duration = self.media_player.duration()
             if duration > 0:
-                self.seek_slider.setValue(int((position / duration) * 100))
+                # Use higher resolution for smooth slider movement
+                slider_value = int((position / duration) * 10000)
+                self.seek_slider.setValue(slider_value)
             
             # Update time label
             current_time = self.format_time(position)
@@ -1575,6 +1580,10 @@ class BlobPreviewDialog(QDialog):
         if hasattr(self, 'time_label'):
             total_time = self.format_time(duration)
             self.time_label.setText(f"00:00 / {total_time}")
+        
+        # Enable smooth seeking once duration is known
+        if hasattr(self, 'seek_slider') and duration > 0:
+            self.seek_slider.setEnabled(True)
     
     def on_seek_start(self):
         """Handle seek slider press."""
@@ -1585,9 +1594,24 @@ class BlobPreviewDialog(QDialog):
         if hasattr(self, 'media_player') and self.media_player:
             duration = self.media_player.duration()
             if duration > 0:
-                position = int((self.seek_slider.value() / 100) * duration)
+                # Use higher resolution for precise seeking
+                position = int((self.seek_slider.value() / 10000) * duration)
                 self.media_player.setPosition(position)
         self.seeking = False
+    
+    def on_seek_moved(self, value):
+        """Handle real-time seeking while dragging."""
+        if self.seeking and hasattr(self, 'media_player') and self.media_player:
+            duration = self.media_player.duration()
+            if duration > 0:
+                # Real-time seeking for smooth video scrubbing
+                position = int((value / 10000) * duration)
+                self.media_player.setPosition(position)
+                
+                # Update time label in real-time
+                current_time = self.format_time(position)
+                total_time = self.format_time(duration)
+                self.time_label.setText(f"{current_time} / {total_time}")
     
     def on_speed_changed(self, speed_text):
         """Handle playback speed change."""
@@ -1750,6 +1774,11 @@ class SQLQueryDialog(QDialog):
         self.results_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.results_table.setSortingEnabled(True)
         self.results_table.setObjectName("resultsTable")
+        
+        # Enable smooth scrolling for SQL results table
+        self.results_table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.results_table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        
         layout.addWidget(self.results_table)
         
         # Status
@@ -2173,6 +2202,10 @@ class TableWidget(QTableWidget):
         self.setShowGrid(True)
         self.setWordWrap(False)
         
+        # Smooth scrolling
+        self.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        
         # Set header properties for responsiveness
         h_header = self.horizontalHeader()
         h_header.setStretchLastSection(True)
@@ -2451,6 +2484,31 @@ class SQLiteExplorer(QMainWindow):
         
         logger.debug("SQLiteExplorer.__init__: Initialization completed successfully")
     
+
+    
+    def toggle_sidebar(self):
+        """Toggle sidebar visibility."""
+        if hasattr(self, 'sidebar_widget'):
+            if self.sidebar_widget.isVisible():
+                self.sidebar_widget.hide()
+                # Change button to show arrow and move to main area
+                if hasattr(self, 'sidebar_toggle_btn'):
+                    self.sidebar_toggle_btn.setText("»")
+                    self.sidebar_toggle_btn.setToolTip("Show sidebar")
+                    self.sidebar_toggle_btn.setParent(self.main_widget)
+                    self.sidebar_toggle_btn.move(5, 5)
+                    self.sidebar_toggle_btn.show()
+            else:
+                self.sidebar_widget.show()
+                # Change button back to hide arrow and move to sidebar
+                if hasattr(self, 'sidebar_toggle_btn'):
+                    self.sidebar_toggle_btn.setText("«")
+                    self.sidebar_toggle_btn.setToolTip("Hide sidebar")
+                    self.sidebar_toggle_btn.setParent(self.sidebar_widget)
+                    # Re-add to header layout
+                    header_layout = self.sidebar_widget.layout().itemAt(0).layout()
+                    header_layout.addWidget(self.sidebar_toggle_btn)
+    
     def setup_ui(self):
         """Setup the responsive user interface."""
         self.setWindowTitle("SQLite Database Explorer - Professional Edition")
@@ -2514,11 +2572,25 @@ class SQLiteExplorer(QMainWindow):
         sidebar_layout.setContentsMargins(8, 8, 8, 8)
         sidebar_layout.setSpacing(6)
         
-        # Header with icon and title
+        # Header with icon, title and hide button
+        header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        
         title_label = QLabel("📊 Tables")
         title_label.setFont(QFont("Segoe UI", 11, QFont.Bold))
         title_label.setStyleSheet("color: #0057FF; padding: 3px 0; font-weight: bold;")
-        sidebar_layout.addWidget(title_label)
+        header_layout.addWidget(title_label)
+        
+        header_layout.addStretch()
+        
+        self.sidebar_toggle_btn = QPushButton("«")
+        self.sidebar_toggle_btn.setFixedSize(20, 20)
+        self.sidebar_toggle_btn.setToolTip("Hide sidebar")
+        self.sidebar_toggle_btn.clicked.connect(self.toggle_sidebar)
+        self.sidebar_toggle_btn.setStyleSheet("QPushButton { font-size: 12px; font-weight: bold; }")
+        header_layout.addWidget(self.sidebar_toggle_btn)
+        
+        sidebar_layout.addLayout(header_layout)
         
         # Table list
         self.table_list = QListWidget()
@@ -2545,11 +2617,16 @@ class SQLiteExplorer(QMainWindow):
         # Responsive button container
         self.setup_responsive_buttons(main_layout)
         
-        # Table widget
+        # Table widget with smooth scrolling
         self.table_widget = TableWidget()
         self.table_widget.cell_changed_signal.connect(self.on_cell_changed)
         self.table_widget.blob_changed_signal.connect(self.on_blob_changed)
         self.table_widget.itemSelectionChanged.connect(self.on_selection_changed)
+        
+        # Enable smooth scrolling for the main table
+        self.table_widget.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.table_widget.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        
         main_layout.addWidget(self.table_widget)
         
         parent.addWidget(self.main_widget)
@@ -2644,6 +2721,13 @@ class SQLiteExplorer(QMainWindow):
         
         # View menu
         view_menu = menubar.addMenu('View')
+        
+        # Sidebar toggle
+        sidebar_action = view_menu.addAction('Show/Hide Sidebar')
+        sidebar_action.setShortcut('Ctrl+B')
+        sidebar_action.triggered.connect(self.toggle_sidebar)
+        
+        view_menu.addSeparator()
         theme_menu = view_menu.addMenu('Theme')
         
         system_action = theme_menu.addAction('System Theme')
