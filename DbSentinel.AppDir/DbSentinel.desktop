@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=DbSentinel
+Comment=SQLite Database Explorer
+Exec=sqlite_explorer.py
+Icon=DbSentinel
+Categories=Development;Database;
+Terminal=false
+StartupWMClass=DbSentinel

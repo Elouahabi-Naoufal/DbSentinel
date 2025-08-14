@@ -1,0 +1,9 @@
+#!/bin/bash
+HERE="$(dirname "$(readlink -f "${0}")")"
+export APPDIR="$HERE"
+export PATH="${HERE}/usr/bin:${PATH}"
+export LD_LIBRARY_PATH="${HERE}/usr/lib:${LD_LIBRARY_PATH}"
+export PYTHONPATH="${HERE}/usr/lib/python3/site-packages:${PYTHONPATH}"
+
+cd "$HERE"
+exec python3 sqlite_explorer.py "$@"

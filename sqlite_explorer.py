@@ -55,7 +55,7 @@ from PyQt5.QtWidgets import (
     QAbstractItemView, QCheckBox, QFrame, QComboBox, QScrollArea,
     QGroupBox, QGridLayout, QTextEdit, QSlider, QActionGroup
 )
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QUrl, QDateTime
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QUrl, QDateTime, QThread
 from PyQt5.QtGui import QFont, QIcon, QPalette, QColor, QPixmap
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
@@ -284,29 +284,21 @@ class DatabaseManager:
         
         cursor = self.connection.cursor()
         
-        # Debug logging
-        print(f"DEBUG UPDATE: table={table_name}, rowid={rowid}, column={column}")
-        print(f"DEBUG UPDATE: value type={type(value)}, length={len(value) if hasattr(value, '__len__') else 'N/A'}")
-        sys.stdout.flush()
-        
-        # Handle BLOB data with proper SQLite BLOB support
-        if isinstance(value, bytes):
-            query = f"UPDATE {table_name} SET {column} = ? WHERE rowid = ?"
-            print(f"DEBUG UPDATE: Using sqlite3.Binary for BLOB data")
-            cursor.execute(query, (sqlite3.Binary(value), rowid))
-        else:
-            query = f"UPDATE {table_name} SET {column} = ? WHERE rowid = ?"
-            cursor.execute(query, (value, rowid))
-        
-        self.connection.commit()
-        
-        # Verify the update
-        cursor.execute(f"SELECT {column} FROM {table_name} WHERE rowid = ?", (rowid,))
-        result = cursor.fetchone()
-        print(f"DEBUG UPDATE VERIFY: Retrieved data type={type(result[0]) if result else 'None'}, length={len(result[0]) if result and hasattr(result[0], '__len__') else 'N/A'}")
-        
-        cursor.close()
-        return True
+        try:
+            # Handle BLOB data
+            if isinstance(value, bytes):
+                binary_data = sqlite3.Binary(value)
+                query = f"UPDATE {table_name} SET {column} = ? WHERE rowid = ?"
+                cursor.execute(query, (binary_data, rowid))
+            else:
+                query = f"UPDATE {table_name} SET {column} = ? WHERE rowid = ?"
+                cursor.execute(query, (value, rowid))
+            
+            self.connection.commit()
+            return True
+            
+        finally:
+            cursor.close()
     
     def delete_rows(self, table_name: str, rowids: List[int]) -> bool:
         """Delete rows from the table."""
@@ -2045,6 +2037,91 @@ class SQLQueryDialog(QDialog):
                 self.results_table.setColumnWidth(col, 300)
 
 
+class DatabaseUploadWorker(QThread):
+    """Worker thread for file reading only - database on main thread."""
+    
+    progress = pyqtSignal(int)  # Progress percentage
+    status = pyqtSignal(str)    # Status message
+    file_ready = pyqtSignal(bytes, str)  # blob_data, filename ready for database
+    error = pyqtSignal(str)     # Error message
+    
+    def __init__(self, file_path):
+        super().__init__()
+        self.file_path = file_path
+    
+    def run(self):
+        try:
+            filename = os.path.basename(self.file_path)
+            file_size = os.path.getsize(self.file_path)
+            
+            self.status.emit(f"Reading {filename}...")
+            self.progress.emit(10)
+            
+            with open(self.file_path, 'rb') as f:
+                blob_data = f.read()
+            
+            self.status.emit(f"File loaded ({file_size:,} bytes)")
+            self.progress.emit(50)
+            
+            self.file_ready.emit(blob_data, filename)
+            
+        except Exception as e:
+            self.error.emit(f"File read failed: {str(e)}")
+
+
+class FileUploadWorker(QThread):
+    """Worker thread for simple file reading."""
+    
+    progress = pyqtSignal(int)  # Progress percentage
+    status = pyqtSignal(str)    # Status message
+    finished = pyqtSignal(bytes, str)  # blob_data, filename
+    error = pyqtSignal(str)     # Error message
+    
+    def __init__(self, file_path):
+        super().__init__()
+        self.file_path = file_path
+    
+    def run(self):
+        try:
+            filename = os.path.basename(self.file_path)
+            
+            if not os.path.exists(self.file_path):
+                self.error.emit("File not found")
+                return
+            
+            self.status.emit(f"Loading {filename}...")
+            with open(self.file_path, 'rb') as f:
+                blob_data = f.read()
+            
+            self.status.emit("File loaded")
+            self.finished.emit(blob_data, filename)
+            
+        except Exception as e:
+            self.error.emit(f"File read error: {str(e)}")
+
+
+class FileWorker(QThread):
+    """Simple worker for large file operations."""
+    finished = pyqtSignal(bytes, str)
+    error = pyqtSignal(str)
+    
+    def __init__(self, file_path):
+        super().__init__()
+        self.file_path = file_path
+    
+    def run(self):
+        try:
+            with open(self.file_path, 'rb') as f:
+                data = f.read()
+            filename = os.path.basename(self.file_path)
+            self.finished.emit(data, filename)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+
+
+
 class BlobFieldWidget(QWidget):
     """Widget for BLOB field input with file browser."""
     
@@ -2052,6 +2129,7 @@ class BlobFieldWidget(QWidget):
         super().__init__(parent)
         self.column_name = column_name
         self.blob_data = None
+        self.worker = None
         self.setup_ui()
     
     def setup_ui(self):
@@ -2077,16 +2155,53 @@ class BlobFieldWidget(QWidget):
         )
         
         if file_path:
-            try:
-                with open(file_path, 'rb') as f:
-                    self.blob_data = f.read()
+            file_size = os.path.getsize(file_path)
+            
+            # For small files, load directly
+            if file_size < 5 * 1024 * 1024:  # < 5MB
+                try:
+                    with open(file_path, 'rb') as f:
+                        self.blob_data = f.read()
+                    
+                    filename = os.path.basename(file_path)
+                    self.file_label.setText(f"Selected: {filename} ({file_size:,} bytes)")
+                    self.file_label.setStyleSheet("color: #28a745; font-weight: 500; padding: 8px;")
+                except Exception as e:
+                    QMessageBox.critical(self, "Error", f"Failed to read file: {str(e)}")
+            else:
+                # For large files, use worker thread
+                self.browse_btn.setEnabled(False)
+                self.browse_btn.setText("Loading...")
                 
-                filename = os.path.basename(file_path)
-                file_size = len(self.blob_data)
-                self.file_label.setText(f"Selected: {filename} ({file_size} bytes)")
-                self.file_label.setStyleSheet("color: #28a745; font-weight: 500; padding: 8px;")
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to read file: {str(e)}")
+                self.worker = FileWorker(file_path)
+                self.worker.finished.connect(self.on_file_loaded)
+                self.worker.error.connect(self.on_error)
+                self.worker.start()
+    
+    def on_file_loaded(self, data, filename):
+        """Handle file loaded by worker."""
+        self.blob_data = data
+        file_size = len(data)
+        self.file_label.setText(f"Selected: {filename} ({file_size:,} bytes)")
+        self.file_label.setStyleSheet("color: #28a745; font-weight: 500; padding: 8px;")
+        
+        self.browse_btn.setEnabled(True)
+        self.browse_btn.setText("Browse...")
+        
+        if self.worker:
+            self.worker.deleteLater()
+            self.worker = None
+    
+    def on_error(self, error_msg):
+        """Handle file loading error."""
+        QMessageBox.critical(self, "Error", f"Failed to read file: {error_msg}")
+        
+        self.browse_btn.setEnabled(True)
+        self.browse_btn.setText("Browse...")
+        
+        if self.worker:
+            self.worker.deleteLater()
+            self.worker = None
     
     def get_value(self):
         """Get the blob data."""
@@ -2299,21 +2414,47 @@ class TableWidget(QTableWidget):
         )
         
         if file_path:
-            try:
-                with open(file_path, 'rb') as f:
-                    blob_data = f.read()
+            file_size = os.path.getsize(file_path)
+            
+            # For small files, load directly
+            if file_size < 5 * 1024 * 1024:  # < 5MB
+                try:
+                    with open(file_path, 'rb') as f:
+                        blob_data = f.read()
+                    
+                    filename = os.path.basename(file_path)
+                    item.setText(f"<BLOB: {len(blob_data):,} bytes> {filename} [Right-click to view]")
+                    item.original_value = blob_data
+                    
+                    QTimer.singleShot(10, lambda: self.blob_changed_signal.emit(item.row(), item.column(), blob_data))
+                    
+                except Exception as e:
+                    QMessageBox.critical(self, "Error", f"Failed to read file: {str(e)}")
+            else:
+                # For large files, use worker thread
+                item.setText(f"Loading {os.path.basename(file_path)}...")
                 
-                filename = os.path.basename(file_path)
+                worker = FileWorker(file_path)
                 
-                # Update display
-                item.setText(f"<BLOB: {len(blob_data)} bytes> {filename} [Right-click to view]")
-                item.original_value = blob_data
+                def on_loaded(blob_data, filename):
+                    item.setText(f"<BLOB: {len(blob_data):,} bytes> {filename} [Right-click to view]")
+                    item.original_value = blob_data
+                    
+                    # Use longer delay for large blobs
+                    delay = 200 if len(blob_data) > 50 * 1024 * 1024 else 100
+                    QTimer.singleShot(delay, lambda: self.blob_changed_signal.emit(item.row(), item.column(), blob_data))
+                    
+                    worker.deleteLater()
                 
-                # Emit signal for database update
-                self.blob_changed_signal.emit(item.row(), item.column(), blob_data)
+                def on_error(error_msg):
+                    item.setText(f"Error loading {os.path.basename(file_path)}")
+                    QMessageBox.critical(self, "Error", f"Failed to read file: {error_msg}")
+                    worker.deleteLater()
                 
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to read file: {str(e)}")
+                worker.finished.connect(on_loaded)
+                worker.error.connect(on_error)
+                worker.start()
+
     
     def save_blob(self, blob_data: bytes, column_name: str):
         """Save blob data to file with proper extension."""
@@ -3307,14 +3448,34 @@ class SQLiteExplorer(QMainWindow):
             # Get column name from header
             column_name = self.table_widget.horizontalHeaderItem(col).text()
             
-            # Update database with blob data
-            self.db_manager.update_cell(self.current_table, rowid, column_name, blob_data)
-            self.statusBar().showMessage(f"Updated BLOB {column_name} in row {rowid}")
+            # Update database with blob data in background
+            QTimer.singleShot(10, lambda: self.update_database_blob(rowid, column_name, blob_data))
             
         except Exception as e:
+            print(f"Error in on_blob_changed: {e}")
             QMessageBox.critical(self, "Error", f"Failed to update BLOB cell: {str(e)}")
-            # Reload table to revert changes
-            self.load_table_data(self.current_table)
+    
+    def update_database_blob(self, rowid, column_name, blob_data):
+        """Update database with blob data using QTimer for large operations."""
+        def do_update():
+            try:
+                self.db_manager.update_cell(self.current_table, rowid, column_name, blob_data)
+                self.statusBar().showMessage(f"Updated BLOB {column_name} in row {rowid}")
+            except Exception as e:
+                QMessageBox.critical(self, "Database Error", f"Failed to save BLOB: {str(e)}")
+                if self.current_table:
+                    self.load_table_data(self.current_table)
+        
+        # Use QTimer with longer delay for large blobs to allow UI updates
+        if len(blob_data) > 100 * 1024 * 1024:  # > 100MB
+            delay = 500
+        elif len(blob_data) > 50 * 1024 * 1024:  # > 50MB
+            delay = 300
+        elif len(blob_data) > 10 * 1024 * 1024:  # > 10MB
+            delay = 100
+        else:
+            delay = 10
+        QTimer.singleShot(delay, do_update)
     
     def add_row(self):
         """Add a new row to the current table."""
@@ -3329,9 +3490,26 @@ class SQLiteExplorer(QMainWindow):
             dialog = AddRowDialog(columns, self)
             if dialog.exec_() == QDialog.Accepted:
                 data = dialog.get_data()
-                self.db_manager.insert_row(self.current_table, data)
-                self.load_table_data(self.current_table)
-                self.statusBar().showMessage("Row added successfully")
+                
+                def do_insert():
+                    try:
+                        self.db_manager.insert_row(self.current_table, data)
+                        self.load_table_data(self.current_table)
+                        self.statusBar().showMessage("Row added successfully")
+                    except Exception as e:
+                        QMessageBox.critical(self, "Error", f"Failed to add row: {str(e)}")
+                
+                # Check if any BLOB data is large
+                max_blob_size = max((len(v) for v in data.values() if isinstance(v, bytes)), default=0)
+                if max_blob_size > 100 * 1024 * 1024:  # > 100MB
+                    delay = 500
+                elif max_blob_size > 50 * 1024 * 1024:  # > 50MB
+                    delay = 300
+                elif max_blob_size > 10 * 1024 * 1024:  # > 10MB
+                    delay = 100
+                else:
+                    delay = 10
+                QTimer.singleShot(delay, do_insert)
         
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to add row: {str(e)}")
@@ -3356,12 +3534,17 @@ class SQLiteExplorer(QMainWindow):
         )
         
         if reply == QMessageBox.Yes:
-            try:
-                self.db_manager.delete_rows(self.current_table, rowids)
-                self.load_table_data(self.current_table)
-                self.statusBar().showMessage(f"Deleted {len(rowids)} row(s)")
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to delete rows: {str(e)}")
+            def do_delete():
+                try:
+                    self.db_manager.delete_rows(self.current_table, rowids)
+                    self.load_table_data(self.current_table)
+                    self.statusBar().showMessage(f"Deleted {len(rowids)} row(s)")
+                except Exception as e:
+                    QMessageBox.critical(self, "Error", f"Failed to delete rows: {str(e)}")
+            
+            # Use QTimer with longer delay for many rows
+            delay = 100 if len(rowids) > 100 else 10
+            QTimer.singleShot(delay, do_delete)
     
     def create_table(self):
         """Create a new table."""
@@ -3662,7 +3845,7 @@ def main():
     # Set application icon (if available)
     logger.debug("main: Attempting to set application icon")
     try:
-        app.setWindowIcon(QIcon("database.ico"))
+        app.setWindowIcon(QIcon("DbSentinel.png"))
         logger.debug("main: Application icon set successfully")
     except Exception as e:
         logger.debug(f"main: Icon file not found or failed to load: {e}")
